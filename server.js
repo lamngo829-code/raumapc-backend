@@ -1,183 +1,127 @@
 const express = require('express');
 const cors = require('cors');
-const mongoose = require('mongoose'); // Khai báo thư viện kết nối Database
+const mongoose = require('mongoose');
+const nodemailer = require('nodemailer');
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-
-const nodemailer = require('nodemailer');
-
-// Cấu hình tài khoản người gửi (Gmail của bạn)
+// ==========================================
+// 1. CẤU HÌNH GỬI MAIL (NODEMAILER)
+// ==========================================
 const transporter = nodemailer.createTransport({
     service: 'gmail',
     auth: {
-        user: 'lamngo829@gmail.com', // Nhập chính xác địa chỉ Gmail của bạn vào đây
-        pass: 'uangzjjwgqhjjocn' // <-- Dán mã viết liền không khoảng trắng vào đây
+        user: 'lamngo829@gmail.com', // Đã đúng thông tin của bạn
+        pass: 'uangzjjwgqhjjocn'
     }
 });
 
-// ====================================================
-// 1. KẾT NỐI CƠ SỞ DỮ LIỆU MONGODB
-// ====================================================
+// ==========================================
+// 2. KẾT NỐI MONGODB
+// ==========================================
 mongoose.connect('mongodb+srv://lamngo829_db_user:KDJUXdVXOfCKUSfx@cluster0.r46tion.mongodb.net/raumapc?appName=Cluster0')
-    .then(() => console.log('✅ Đã kết nối thành công với CSDL MongoDB!'))
-    .catch(err => console.error('❌ Lỗi kết nối CSDL:', err));
+    .then(() => console.log('✅ Đã kết nối MongoDB!'))
+    .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
-// ====================================================
-// 2. TẠO KHUÔN MẪU SẢN PHẨM (SCHEMA) TRONG DATABASE
-// ====================================================
+// ==========================================
+// 3. KHUÔN MẪU DỮ LIỆU (SCHEMAS)
+// ==========================================
 const productSchema = new mongoose.Schema({
-    name: String,
-    price: String,
-    img: String,
-    warranty: String,
-    specs: String,
-    description: String,
-    category: String // <--- THÊM DÒNG NÀY ĐỂ PHÂN LOẠI
+    name: String, price: String, img: String, warranty: String,
+    specs: String, description: String, category: String 
 });
-
 const Product = mongoose.model('Product', productSchema);
 
-// ====================================================
-// 3. CÁC API THAO TÁC VỚI DATABASE THẬT
-// ====================================================
-
-// API Lấy danh sách (READ)
-// ... (Kéo xuống API GET) ...
-app.get('/api/products', async (req, res) => {
-    try {
-        const products = await Product.find(); 
-        const formattedProducts = products.map(sp => ({
-            id: sp._id.toString(),
-            name: sp.name,
-            price: sp.price,
-            img: sp.img,
-            warranty: sp.warranty,
-            specs: sp.specs,
-            description: sp.description,
-            category: sp.category || 'khac' // <--- THÊM DÒNG NÀY (nếu SP cũ chưa có nhãn thì gom vào mục Khác)
-        }));
-        res.json(formattedProducts);
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi lấy dữ liệu!" });
-    }
-});
-
-// API Thêm sản phẩm (CREATE)
-app.post('/api/products', async (req, res) => {
-    try {
-        const newProduct = new Product(req.body);
-        await newProduct.save(); // Lệnh lưu thẳng vào ổ cứng
-        res.json({ message: "Thêm sản phẩm thành công vào CSDL!" });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi lưu dữ liệu!" });
-    }
-});
-
-// API Sửa sản phẩm (UPDATE)
-app.put('/api/products/:id', async (req, res) => {
-    try {
-        // Tìm SP theo ID và cập nhật nội dung mới
-        await Product.findByIdAndUpdate(req.params.id, req.body);
-        res.json({ message: "Cập nhật sản phẩm thành công!" });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi cập nhật!" });
-    }
-});
-
-// API Xóa sản phẩm (DELETE)
-app.delete('/api/products/:id', async (req, res) => {
-    try {
-        await Product.findByIdAndDelete(req.params.id); // Lệnh xóa khỏi ổ cứng
-        res.json({ message: "Đã xóa sản phẩm khỏi hệ thống!" });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi khi xóa!" });
-    }
-});
-
-
-
-// ====================================================
-// 4. QUẢN LÝ ĐƠN HÀNG (ORDERS) TRONG DATABASE
-// ====================================================
-
-// Tạo khuôn mẫu Đơn hàng
 const orderSchema = new mongoose.Schema({
     orderId: String,
     date: String,
-    username: String,
-    email: String, // <--- THÊM DÒNG NÀY VÀO ĐỂ LƯU EMAIL KHÁCH
+    username: String, // Lưu Họ tên + SĐT + Địa chỉ
+    account: String,  // Lưu định danh tài khoản đăng nhập (VD: lamngo829)
+    email: String,    // Lưu Email để gửi thư
     items: Array,    
     total: Number,
     status: String
 });
-
 const Order = mongoose.model('Order', orderSchema);
 
-// API 1: Khách hàng gửi đơn hàng lên Server (CREATE)
+// ==========================================
+// 4. API SẢN PHẨM (PRODUCTS)
+// ==========================================
+app.get('/api/products', async (req, res) => {
+    try {
+        const products = await Product.find();
+        res.json(products.map(sp => ({
+            id: sp._id.toString(), name: sp.name, price: sp.price, img: sp.img,
+            category: sp.category || 'khac'
+        })));
+    } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
+});
+
+app.post('/api/products', async (req, res) => {
+    try { await new Product(req.body).save(); res.json({ message: "Đã thêm!" }); } 
+    catch (err) { res.status(500).json({ message: "Lỗi!" }); }
+});
+
+app.put('/api/products/:id', async (req, res) => {
+    try { await Product.findByIdAndUpdate(req.params.id, req.body); res.json({ message: "Đã sửa!" }); } 
+    catch (err) { res.status(500).json({ message: "Lỗi!" }); }
+});
+
+app.delete('/api/products/:id', async (req, res) => {
+    try { await Product.findByIdAndDelete(req.params.id); res.json({ message: "Đã xóa!" }); } 
+    catch (err) { res.status(500).json({ message: "Lỗi!" }); }
+});
+
+// ==========================================
+// 5. API ĐƠN HÀNG (ORDERS) & EMAIL
+// ==========================================
+// 5.1 Đặt hàng
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
-        await newOrder.save(); // Lưu ngay vào két sắt MongoDB
-        
-        console.log("🛒 BÍP BÍP! Có đơn hàng mới nhận:", newOrder.orderId);
+        await newOrder.save(); 
+        console.log(`🛒 Đơn mới: ${newOrder.orderId}`);
 
-        // NỘI DUNG EMAIL GỬI KHÁCH HÀNG
-        const mailOptions = {
-            from: 'email-cua-ban@gmail.com', // Thay bằng Gmail của bạn
-            to: req.body.email, // Lấy email mà khách hàng đã nhập ở khung thanh toán
-            subject: `Xác nhận đặt hàng thành công - Mã đơn: ${newOrder.orderId}`,
-            text: `Chào ${newOrder.username},\n\nCảm ơn bạn đã tin tưởng mua sắm tại Rau Má PC!\n\nTHÔNG TIN ĐƠN HÀNG:\n- Mã đơn hàng: ${newOrder.orderId}\n- Tổng thanh toán: ${new Intl.NumberFormat('vi-VN').format(newOrder.total)}đ\n- Tình trạng: ${newOrder.status}\n\nChúng tôi sẽ sớm liên hệ để giao hàng cho bạn!`
-        };
-
-        // KÍCH HOẠT LỆNH GỬI MAIL
-        transporter.sendMail(mailOptions, function(error, info){
-            if (error) {
-                console.log("❌ Lỗi gửi mail:", error);
-            } else {
-                console.log('✅ Đã gửi email xác nhận đến khách hàng: ' + info.response);
-            }
-        });
-
-        res.json({ message: "Đặt hàng và Gửi email thành công!" });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi khi lưu đơn hàng!" });
-    }
+        if (req.body.email) {
+            const mailOptions = {
+                from: 'lamngo829@gmail.com',
+                to: req.body.email,
+                subject: `Xác nhận đặt hàng thành công - Mã đơn: ${newOrder.orderId}`,
+                html: `
+                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
+                        <h2 style="color: #1435c3; text-align: center;">CẢM ƠN BẠN ĐÃ MUA SẮM TẠI RAU MÁ PC!</h2>
+                        <p>Chào bạn,</p>
+                        <p>Đơn hàng <strong>${newOrder.orderId}</strong> của bạn đã được ghi nhận.</p>
+                        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                            <tr style="background: #f4f7fe;"><td style="padding: 10px; font-weight: bold;">Trạng thái:</td><td style="padding: 10px; color:#ff9800; font-weight:bold;">${newOrder.status}</td></tr>
+                            <tr><td style="padding: 10px; font-weight: bold; border-top: 1px solid #ddd;">Tổng thanh toán:</td><td style="padding: 10px; color: #d70018; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">${new Intl.NumberFormat('vi-VN').format(newOrder.total)}đ</td></tr>
+                        </table>
+                        <p style="margin-top: 20px;">Chúng tôi sẽ sớm liên hệ để giao hàng!</p>
+                    </div>`
+            };
+            transporter.sendMail(mailOptions, (error) => {
+                if (error) console.log("❌ Lỗi gửi mail:", error);
+                else console.log('✅ Đã gửi email cho khách: ' + req.body.email);
+            });
+        }
+        res.json({ message: "Đặt hàng thành công!" });
+    } catch (error) { res.status(500).json({ message: "Lỗi khi lưu đơn hàng!" }); }
 });
 
-// API 2: Admin lấy danh sách đơn hàng về xem (READ)
+// 5.2 Lấy danh sách đơn hàng
 app.get('/api/orders', async (req, res) => {
-    try {
-        const orders = await Order.find();
-        res.json(orders);
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi lấy danh sách đơn hàng!" });
-    }
+    try { res.json(await Order.find()); } 
+    catch (err) { res.status(500).json({ message: "Lỗi!" }); }
 });
 
-
-
-// Khởi động Server
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`✅ Máy chủ đang chạy tại cổng ${PORT}`);
-});
-
-
-// API 3: Admin cập nhật trạng thái đơn hàng (UPDATE)
+// 5.3 Admin đổi trạng thái đơn
 app.put('/api/orders/:id/status', async (req, res) => {
     try {
-        const maDonHang = req.params.id; // Lấy mã đơn (VD: RM123456)
-        const trangThaiMoi = req.body.status; // Lấy trạng thái Admin vừa chọn
-
-        // Tìm đơn hàng trong két sắt và đổi trạng thái
-        await Order.findOneAndUpdate({ orderId: maDonHang }, { status: trangThaiMoi });
-        
-        console.log(`📦 Đã chuyển đơn ${maDonHang} sang trạng thái: ${trangThaiMoi}`);
-        res.json({ message: "Cập nhật trạng thái thành công!" });
-    } catch (error) {
-        res.status(500).json({ message: "Lỗi cập nhật trạng thái đơn hàng!" });
-    }
+        await Order.findOneAndUpdate({ orderId: req.params.id }, { status: req.body.status });
+        res.json({ message: "Cập nhật thành công!" });
+    } catch (err) { res.status(500).json({ message: "Lỗi!" }); }
 });
+
+app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy`));
