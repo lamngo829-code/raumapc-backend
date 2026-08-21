@@ -95,7 +95,7 @@ app.post('/api/orders', async (req, res) => {
                 method: 'POST',
                 headers: {
                     'accept': 'application/json',
-                    'api-key': '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', // <--- Dán vào đây
+                    'api-key': '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', // <--- Dán vào đây
                     'content-type': 'application/json'
                 },
                 body: JSON.stringify(emailData)
