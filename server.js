@@ -10,12 +10,16 @@ app.use(express.json());
 // ==========================================
 // 1. CẤU HÌNH GỬI MAIL (NODEMAILER)
 // ==========================================
+
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.gmail.com', // Khai báo rõ cổng máy chủ của Gmail
+    port: 465,
+    secure: true,
     auth: {
-        user: 'lamngo829@gmail.com', // Đã đúng thông tin của bạn
-        pass: 'uangzjjwgqhjjocn'
-    }
+        user: 'lamngo829@gmail.com', // Gmail của bạn
+        pass: 'uangzjjwgqhjjocn'     // Mật khẩu ứng dụng của bạn
+    },
+    family: 4 // <--- THẦN CHÚ Ở ĐÂY: Ép Render phải dùng chuẩn IPv4 truyền thống để không bị chặn!
 });
 
 // ==========================================
