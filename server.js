@@ -6,6 +6,18 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+const nodemailer = require('nodemailer');
+
+// Cấu hình tài khoản người gửi (Gmail của bạn)
+const transporter = nodemailer.createTransport({
+    service: 'gmail',
+    auth: {
+        user: 'lamngo829@gmail.com', // Nhập chính xác địa chỉ Gmail của bạn vào đây
+        pass: 'uangzjjwgqhjjocn' // <-- Dán mã viết liền không khoảng trắng vào đây
+    }
+});
+
 // ====================================================
 // 1. KẾT NỐI CƠ SỞ DỮ LIỆU MONGODB
 // ====================================================
@@ -96,7 +108,8 @@ const orderSchema = new mongoose.Schema({
     orderId: String,
     date: String,
     username: String,
-    items: Array,    // Chứa danh sách các sản phẩm đã mua
+    email: String, // <--- THÊM DÒNG NÀY VÀO ĐỂ LƯU EMAIL KHÁCH
+    items: Array,    
     total: Number,
     status: String
 });
@@ -110,7 +123,25 @@ app.post('/api/orders', async (req, res) => {
         await newOrder.save(); // Lưu ngay vào két sắt MongoDB
         
         console.log("🛒 BÍP BÍP! Có đơn hàng mới nhận:", newOrder.orderId);
-        res.json({ message: "Đặt hàng thành công!" });
+
+        // NỘI DUNG EMAIL GỬI KHÁCH HÀNG
+        const mailOptions = {
+            from: 'email-cua-ban@gmail.com', // Thay bằng Gmail của bạn
+            to: req.body.email, // Lấy email mà khách hàng đã nhập ở khung thanh toán
+            subject: `Xác nhận đặt hàng thành công - Mã đơn: ${newOrder.orderId}`,
+            text: `Chào ${newOrder.username},\n\nCảm ơn bạn đã tin tưởng mua sắm tại Rau Má PC!\n\nTHÔNG TIN ĐƠN HÀNG:\n- Mã đơn hàng: ${newOrder.orderId}\n- Tổng thanh toán: ${new Intl.NumberFormat('vi-VN').format(newOrder.total)}đ\n- Tình trạng: ${newOrder.status}\n\nChúng tôi sẽ sớm liên hệ để giao hàng cho bạn!`
+        };
+
+        // KÍCH HOẠT LỆNH GỬI MAIL
+        transporter.sendMail(mailOptions, function(error, info){
+            if (error) {
+                console.log("❌ Lỗi gửi mail:", error);
+            } else {
+                console.log('✅ Đã gửi email xác nhận đến khách hàng: ' + info.response);
+            }
+        });
+
+        res.json({ message: "Đặt hàng và Gửi email thành công!" });
     } catch (error) {
         res.status(500).json({ message: "Lỗi khi lưu đơn hàng!" });
     }
