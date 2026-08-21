@@ -3,24 +3,30 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 
+// 🔥 TUYỆT CHIÊU CUỐI: Ép toàn bộ hệ thống lõi của Node.js ưu tiên dùng IPv4
+require('dns').setDefaultResultOrder('ipv4first');
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 // ==========================================
-// 1. CẤU HÌNH GỬI MAIL (NODEMAILER)
+// 1. CẤU HÌNH GỬI MAIL (NODEMAILER) - Đã đổi cổng 587
 // ==========================================
-
 const transporter = nodemailer.createTransport({
-    host: 'smtp.gmail.com', // Khai báo rõ cổng máy chủ của Gmail
-    port: 465,
-    secure: true,
+    host: 'smtp.gmail.com',
+    port: 587, // Dùng cổng 587 an toàn hơn trên mây
+    secure: false, // Bắt buộc phải là false khi dùng cổng 587
     auth: {
-        user: 'lamngo829@gmail.com', // Gmail của bạn
-        pass: 'uangzjjwgqhjjocn'     // Mật khẩu ứng dụng của bạn
+        user: 'lamngo829@gmail.com',
+        pass: 'uangzjjwgqhjjocn'
     },
-    family: 4 // <--- THẦN CHÚ Ở ĐÂY: Ép Render phải dùng chuẩn IPv4 truyền thống để không bị chặn!
+    tls: {
+        rejectUnauthorized: false // Chống lỗi chứng chỉ bảo mật trên Render
+    }
 });
+
+// ... (Giữ nguyên toàn bộ phần kết nối MongoDB và các API bên dưới của bạn) ...
 
 // ==========================================
 // 2. KẾT NỐI MONGODB
