@@ -95,14 +95,16 @@ app.post('/api/orders', async (req, res) => {
                 method: 'POST',
                 headers: {
                     'accept': 'application/json',
-                    'api-key': 'xkeysib-eba91f85099d17d20824018ee3108979dd2305b7351', // <--- Dán vào đây
+                    'api-key': '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', // <--- Dán vào đây
                     'content-type': 'application/json'
                 },
                 body: JSON.stringify(emailData)
             })
-                .then(response => response.json())
-                .then(data => console.log('✅ Gửi email thành công qua Brevo API:', data))
-                .catch(error => console.log('❌ Lỗi gọi API gửi mail:', error));
+                .then(async response => {
+                    const data = await response.json();
+                    console.log('Kết quả từ Brevo:', data);
+                })
+                .catch(error => console.log('❌ Lỗi kết nối Brevo:', error));
         }
 
         res.json({ message: "Đặt hàng thành công!" });
