@@ -69,47 +69,9 @@ app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
         await newOrder.save();
-        console.log(`🛒 Đơn mới: ${newOrder.orderId}`);
-
-        // GỬI MAIL QUA GIAO THỨC HTTPS (Cổng 443 - Không bao giờ bị chặn)
-        if (req.body.email) {
-            const emailData = {
-                sender: { name: "Rau Má PC", email: "lamngo829@gmail.com" }, // Email của bạn đã đăng ký trên Brevo
-                to: [{ email: req.body.email }],
-                subject: `Xác nhận đặt hàng thành công - Mã đơn: ${newOrder.orderId}`,
-                htmlContent: `
-                    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #ddd; border-radius: 8px;">
-                        <h2 style="color: #1435c3; text-align: center;">CẢM ƠN BẠN ĐÃ MUA SẮM TẠI RAU MÁ PC!</h2>
-                        <p>Chào bạn,</p>
-                        <p>Đơn hàng <strong>${newOrder.orderId}</strong> của bạn đã được ghi nhận thành công.</p>
-                        <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
-                            <tr style="background: #f4f7fe;"><td style="padding: 10px; font-weight: bold;">Trạng thái:</td><td style="padding: 10px; color:#ff9800; font-weight:bold;">${newOrder.status}</td></tr>
-                            <tr><td style="padding: 10px; font-weight: bold; border-top: 1px solid #ddd;">Tổng thanh toán:</td><td style="padding: 10px; color: #d70018; font-weight: bold; font-size: 16px; border-top: 1px solid #ddd;">${new Intl.NumberFormat('vi-VN').format(newOrder.total)}đ</td></tr>
-                        </table>
-                        <p style="margin-top: 20px;">Chúng tôi sẽ sớm liên hệ để giao hàng cho bạn!</p>
-                    </div>`
-            };
-
-            // Dùng hàm fetch gọi thẳng sang máy chủ Brevo qua đường web
-            fetch('https://api.brevo.com/v3/smtp/email', {
-                method: 'POST',
-                headers: {
-                    'accept': 'application/json',
-                    'api-key': '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', // <--- Dán vào đây
-                    'content-type': 'application/json'
-                },
-                body: JSON.stringify(emailData)
-            })
-                .then(async response => {
-                    const data = await response.json();
-                    console.log('Kết quả từ Brevo:', data);
-                })
-                .catch(error => console.log('❌ Lỗi kết nối Brevo:', error));
-        }
-
+        console.log(`🛒 Đơn mới đã lưu Database: ${newOrder.orderId}`);
         res.json({ message: "Đặt hàng thành công!" });
     } catch (error) {
-        console.log(error);
         res.status(500).json({ message: "Lỗi khi lưu đơn hàng!" });
     }
 });
