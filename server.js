@@ -41,8 +41,15 @@ app.get('/api/products', async (req, res) => {
     try {
         const products = await Product.find();
         res.json(products.map(sp => ({
-            id: sp._id.toString(), name: sp.name, price: sp.price, img: sp.img,
-            category: sp.category || 'khac'
+            id: sp._id.toString(), 
+            name: sp.name, 
+            price: sp.price, 
+            img: sp.img,
+            category: sp.category || 'khac',
+            // BỔ SUNG 3 DÒNG NÀY ĐỂ MÁY CHỦ TRẢ VỀ ĐẦY ĐỦ THÔNG SỐ:
+            warranty: sp.warranty,
+            specs: sp.specs,
+            description: sp.description
         })));
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
