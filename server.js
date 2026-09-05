@@ -480,7 +480,7 @@ app.post('/api/orders', async (req, res) => {
                 <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
                     <tr>
                         <td style="padding-right: 18px; vertical-align: middle;">
-                            <img src="https://github.com/lamngo829-code/raumapc-backend/blob/main/logo-sticky.jpg?raw=true" alt="Logo Rau Má" style="width: 75px; height: auto; display: block; border-radius: 4px;">
+                            <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo Rau Má" style="width: 75px; height: auto; display: block; border-radius: 4px;">
                         </td>
                         <td style="vertical-align: middle; text-align: left;">
                             <h1 style="margin: 0; font-size: 28px; font-weight: bold; letter-spacing: 1.5px; color: #ffffff;">RAU MÁ PC</h1>
@@ -648,7 +648,7 @@ app.put('/api/orders/:id/status', async (req, res) => {
                 <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
                     <tr>
                         <td style="padding-right: 15px; vertical-align: middle;">
-                            <img src="https://github.com/lamngo829-code/raumapc-backend/blob/main/logo-sticky.jpg?raw=true" alt="Logo" style="width: 65px; height: 65px; object-fit: cover; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: block;">
+                            <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo" style="width: 65px; height: 65px; object-fit: cover; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: block;">
                         </td>
                         <td style="vertical-align: middle; text-align: left;">
                             <h1 style="margin: 0; font-size: 28px; letter-spacing: 1px; color: #ffffff;">RAU MÁ PC</h1>
