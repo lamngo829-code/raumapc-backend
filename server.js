@@ -357,6 +357,41 @@ app.get('/api/products', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
 
+// API Lấy chi tiết 1 sản phẩm - dùng cho trang product-detail.html
+// Hỗ trợ tra bằng CẢ _id (link cũ) LẪN productId (mã SP, link mới) để không phá link cũ
+app.get('/api/products/detail/:id', async (req, res) => {
+    try {
+        const key = req.params.id;
+        let sp = null;
+
+        // Nếu là ObjectId hợp lệ (24 ký tự hex) thì thử tìm theo _id trước
+        if (mongoose.Types.ObjectId.isValid(key)) {
+            sp = await Product.findById(key);
+        }
+
+        // Không thấy (hoặc key không phải ObjectId) thì tìm theo mã productId
+        if (!sp) {
+            sp = await Product.findOne({ productId: key });
+        }
+
+        if (!sp) return res.status(404).json({ message: "Không tìm thấy sản phẩm!" });
+
+        res.json({
+            id: sp._id.toString(),
+            productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
+            name: sp.name,
+            price: sp.price,
+            img: sp.img,
+            warranty: sp.warranty,
+            category: sp.category,
+            brand: sp.brand,
+            specs: sp.specs,
+            description: sp.description,
+            comments: sp.comments
+        });
+    } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
+});
+
 // ==========================================
 // CÁC API THÊM, SỬA, XÓA SẢN PHẨM TỪ ADMIN
 // ==========================================
