@@ -62,17 +62,32 @@ const adminSchema = new mongoose.Schema({
 const Admin = mongoose.model('Admin', adminSchema);
 
 // ==========================================
-// CỬA AN NINH (MIDDLEWARE)
+// CỬA AN NINH (MIDDLEWARE) - BẢN NÂNG CẤP
 // ==========================================
-const verifyToken = (req, res, next) => {
+const verifyToken = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ message: "Bạn chưa đăng nhập!" });
     try {
         const decoded = jwt.verify(token.split(" ")[1], JWT_SECRET);
+        
+        // Dò tìm trực tiếp trong Database xem tài khoản còn tồn tại không
+        let user = await User.findById(decoded.id);
+        if (!user) user = await Admin.findById(decoded.id);
+        
+        // Nếu Database không có (đã bị xóa) -> Khóa cửa và thông báo trục xuất
+        if (!user) {
+            return res.status(401).json({ message: "Tài khoản đã bị xóa khỏi hệ thống!", accountDeleted: true });
+        }
+
         req.user = decoded; 
         next();
     } catch (err) { return res.status(401).json({ message: "Phiên đăng nhập hết hạn!" }); }
 };
+
+// API CHO FRONTEND KIỂM TRA TRẠNG THÁI SỐNG CỦA TÀI KHOẢN
+app.get('/api/auth/verify', verifyToken, (req, res) => {
+    res.json({ success: true });
+});
 
 // ==========================================
 // API BÍ MẬT: TẠO TÀI KHOẢN ADMIN ĐẦU TIÊN TỰ ĐỘNG
