@@ -25,9 +25,10 @@ mongoose.connect(process.env.MONGO_URI)
 // ==========================================
 // Khuôn Sản phẩm
 const productSchema = new mongoose.Schema({
+    productId: String, // MỚI THÊM: Lưu mã ID tùy chỉnh
     name: String, price: String, img: String, warranty: String,
     specs: String, description: String, category: String, brand: String,
-    comments: { type: Array, default: [] } // <-- KHO CHỨA BÌNH LUẬN
+    comments: { type: Array, default: [] }
 });
 productSchema.index({ name: 'text' }); 
 const Product = mongoose.model('Product', productSchema);
@@ -335,52 +336,53 @@ app.post('/api/change-password-verify', verifyToken, async (req, res) => {
 // ==========================================
 // 4. API SẢN PHẨM & TÌM KIẾM
 // ==========================================
+// API Lấy danh sách
 app.get('/api/products', async (req, res) => {
     try { 
         const products = await Product.find();
-        
-        // ĐÓNG GÓI LẠI DỮ LIỆU: Đổi _id của MongoDB thành id cho Giao diện web hiểu
         const formattedProducts = products.map(sp => ({
             id: sp._id.toString(),
+            productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), // MỚI THÊM: Trả về mã SP
             name: sp.name,
             price: sp.price,
             img: sp.img,
             warranty: sp.warranty,
             category: sp.category,
-            brand: sp.brand, // Dạy máy chủ gửi brand về cho web
+            brand: sp.brand, 
             specs: sp.specs,
             description: sp.description,
-            comments: sp.comments // <-- BỔ SUNG DÒNG NÀY ĐỂ TRẢ VỀ BÌNH LUẬN KHI F5
+            comments: sp.comments 
         }));
-        
         res.json(formattedProducts); 
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi Server" }); 
-    }
+    } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
 
 // ==========================================
 // CÁC API THÊM, SỬA, XÓA SẢN PHẨM TỪ ADMIN
 // ==========================================
-// 1. Thêm sản phẩm mới
+// 1. Thêm sản phẩm mới (Có xử lý ID ngẫu nhiên)
 app.post('/api/products', async (req, res) => {
     try {
+        // MỚI THÊM: Tự động tạo ID nếu Admin để trống
+        if (!req.body.productId || req.body.productId.trim() === '') {
+            req.body.productId = 'SP' + Math.floor(100000 + Math.random() * 900000);
+        }
         const newProduct = new Product(req.body);
         await newProduct.save();
         res.json({ message: "Thêm sản phẩm thành công!" });
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi lưu sản phẩm!" }); 
-    }
+    } catch (err) { res.status(500).json({ message: "Lỗi lưu sản phẩm!" }); }
 });
 
 // 2. Cập nhật sản phẩm
 app.put('/api/products/:id', async (req, res) => {
     try {
+        // MỚI THÊM: Tự tạo lại nếu Admin vô tình xóa trống ID khi sửa
+        if (!req.body.productId || req.body.productId.trim() === '') {
+            req.body.productId = 'SP' + Math.floor(100000 + Math.random() * 900000);
+        }
         await Product.findByIdAndUpdate(req.params.id, req.body);
         res.json({ message: "Cập nhật thành công!" });
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi cập nhật!" }); 
-    }
+    } catch (err) { res.status(500).json({ message: "Lỗi cập nhật!" }); }
 });
 
 // 3. Xóa sản phẩm
