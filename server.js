@@ -168,11 +168,10 @@ app.post('/api/register', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
 
-// --- 3. API ĐĂNG NHẬP (BẰNG USERNAME HOẶC EMAIL ĐỀU ĐƯỢC) ---
+// --- 3. API ĐĂNG NHẬP BƯỚC 1 (KIỂM TRA PASS & GỬI OTP) ---
 app.post('/api/login', async (req, res) => {
     try {
         const loginId = req.body.username; 
-
         let user = await User.findOne({ $or: [{ username: loginId }, { email: loginId }] });
         let isRole = 'user';
 
@@ -186,16 +185,57 @@ app.post('/api/login', async (req, res) => {
         const isMatch = await bcrypt.compare(req.body.password, user.password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Sai mật khẩu!" });
 
-        const token = jwt.sign({ id: user._id, username: user.username, role: isRole }, JWT_SECRET, { expiresIn: '7d' });
-        
-        const userData = { username: user.username, fullName: user.fullName, role: isRole };
-        if (isRole === 'user') {
-            userData.email = user.email; 
-            userData.phone = user.phone; 
-            userData.cart = user.cart;
-            userData.createdAt = user.createdAt; // Gửi ngày tạo về cho giao diện web
+        // ĐỐI VỚI ADMIN: Đăng nhập thẳng, bỏ qua OTP
+        if (isRole === 'admin') {
+            const token = jwt.sign({ id: user._id, username: user.username, role: isRole }, JWT_SECRET, { expiresIn: '7d' });
+            return res.json({ success: true, token, user: { username: user.username, fullName: user.fullName, role: isRole }, requireOtp: false });
         }
 
+        // ĐỐI VỚI KHÁCH HÀNG: Tạo mã OTP và gửi Mail
+        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
+
+        const htmlContent = `
+        <div style="font-family: Arial; padding: 20px; border: 1px solid #eee; border-radius: 10px;">
+            <h2 style="color: #1435c3;">MÃ XÁC NHẬN ĐĂNG NHẬP BẢO MẬT</h2>
+            <p>Chào <strong>${user.fullName}</strong>,</p>
+            <div style="background: #f4f7fe; padding: 15px; text-align: center; border-radius: 8px; margin: 20px 0;">
+                <p>Mã xác nhận 6 số để đăng nhập vào Rau Má PC là:</p>
+                <h1 style="color: #d70018; letter-spacing: 5px;">${otpCode}</h1>
+            </div>
+            <p style="color: #d70018; font-weight: bold;">⚠️ Mã này chỉ có hiệu lực trong đúng 60 GIÂY.</p>
+        </div>`;
+
+        const emailData = {
+            service_id: process.env.EMAILJS_SERVICE_ID, 
+            template_id: process.env.EMAILJS_TEMPLATE_ID, 
+            user_id: process.env.EMAILJS_USER_ID, 
+            accessToken: process.env.EMAILJS_TOKEN,
+            template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Đăng Nhập', message: htmlContent }
+        };
+
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
+
+        res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+});
+
+// --- 3.1 API ĐĂNG NHẬP BƯỚC 2 (XÁC NHẬN OTP & CẤP TOKEN) ---
+app.post('/api/login-verify', async (req, res) => {
+    try {
+        const { email, otp } = req.body;
+        
+        const cached = otpCache[email];
+        if (!cached) return res.status(400).json({ success: false, message: "Phiên đăng nhập không hợp lệ!" });
+        if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN (quá 60s)!" });
+        if (cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
+
+        const user = await User.findOne({ email: email });
+        const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
+        
+        const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, createdAt: user.createdAt };
+
+        delete otpCache[email]; 
         res.json({ success: true, token, user: userData });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
