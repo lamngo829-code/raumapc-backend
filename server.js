@@ -147,6 +147,48 @@ app.get('/api/setup-admin', async (req, res) => {
     } catch (err) { res.status(500).send("Lỗi hệ thống: " + err.message); }
 });
 
+// ==========================================
+// TẠO ADMIN MỚI (CHỈ ADMIN HIỆN TẠI MỚI CÓ QUYỀN)
+// ==========================================
+app.post('/api/admin/create', verifyToken, async (req, res) => {
+    try {
+        // Kiểm tra chặn đứng: Nếu không phải Admin thì đuổi ra ngay
+        if (req.user.role !== 'admin') {
+            return res.status(403).json({ success: false, message: "Cảnh báo: Chỉ Admin mới có quyền tạo Admin khác!" });
+        }
+
+        const { fullName, username, password } = req.body;
+        
+        if (!fullName || !username || !password) {
+            return res.status(400).json({ success: false, message: "Vui lòng cung cấp đủ Tên, Tài khoản và Mật khẩu!" });
+        }
+
+        // Kiểm tra trùng lặp
+        const existingAdmin = await Admin.findOne({ username });
+        if (existingAdmin) {
+            return res.status(400).json({ success: false, message: "Tài khoản Admin này đã tồn tại!" });
+        }
+
+        // Băm mật khẩu bảo mật
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Lưu vào Database
+        const newAdmin = new Admin({
+            fullName: fullName,
+            username: username,
+            password: hashedPassword,
+            role: "admin"
+        });
+        
+        await newAdmin.save();
+        res.json({ success: true, message: `Đã tạo thành công Admin: ${fullName} (${username})` });
+
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Lỗi hệ thống: " + err.message }); 
+    }
+});
+
 // --- 1. GỬI MÃ OTP ĐỂ XÁC NHẬN ĐĂNG KÝ ---
 app.post('/api/request-register-otp', async (req, res) => {
     try {
