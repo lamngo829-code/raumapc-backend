@@ -6,10 +6,45 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken'); 
 
 const app = express();
-app.use(cors());
-// Tăng giới hạn dung lượng tải lên cho ảnh Base64 lên 50MB
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// CHỈ CHO PHÉP WEBSITE CỦA BẠN (VERCEL) VÀ LOCALHOST ĐƯỢC GỌI API
+const allowedOrigins = ['https://raumapc-frontend.vercel.app', 'http://127.0.0.1:5500', 'http://localhost:5500'];
+app.use(cors({
+    origin: function (origin, callback) {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Tên miền không hợp lệ (CORS block)'));
+        }
+    },
+    credentials: true
+}));
+
+// HẠ GIỚI HẠN DỮ LIỆU XUỐNG 5MB ĐỂ CHỐNG SPAM SẬP MÁY CHỦ
+app.use(express.json({ limit: '5mb' }));
+app.use(express.urlencoded({ limit: '5mb', extended: true }));
+
+const rateLimit = require('express-rate-limit');
+
+// Khiên 1: Giới hạn toàn hệ thống (Max 300 yêu cầu / 15 phút cho mỗi IP)
+const globalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, 
+    max: 300,
+    message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" }
+});
+app.use(globalLimiter);
+
+// Khiên 2: Khóa chặt cổng Đăng nhập & Gửi OTP (Max 5 lần / 5 phút)
+const authLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000,
+    max: 5, 
+    message: { success: false, message: "Phát hiện dấu hiệu Spam! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." }
+});
+
+// Áp dụng Khiên 2 cho các API nhạy cảm
+app.use('/api/login', authLimiter);
+app.use('/api/request-otp', authLimiter);
+app.use('/api/request-register-otp', authLimiter);
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
