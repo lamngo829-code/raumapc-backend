@@ -63,7 +63,7 @@ const productSchema = new mongoose.Schema({
     productId: String, 
     name: String, price: String, img: String, warranty: String,
     specs: String, description: String, category: String, brand: String,
-    views: { type: Number, default: 0 }, // MỚI THÊM: Lưu lượt xem
+    views: { type: Number, default: 0 },
     comments: { type: Array, default: [] }
 });
 productSchema.index({ name: 'text' }); 
@@ -85,7 +85,8 @@ const userSchema = new mongoose.Schema({
     email: { type: String, required: true }, 
     role: { type: String, default: 'user' },
     cart: { type: Array, default: [] },
-    createdAt: { type: Date, default: Date.now } // Thêm trường lưu ngày tạo
+    avatar: { type: String, default: '' },
+    createdAt: { type: Date, default: Date.now } 
 });
 const User = mongoose.model('User', userSchema);
 
@@ -871,30 +872,32 @@ app.post('/api/request-email-update-otp', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
 
-// --- CẬP NHẬT THÔNG TIN LIÊN HỆ & EMAIL (XÁC THỰC OTP) ---
+// --- CẬP NHẬT THÔNG TIN LIÊN HỆ & EMAIL & AVATAR ---
 app.post('/api/users/me/update', verifyToken, async (req, res) => {
     try {
-        const { phone, email, otp } = req.body;
-        
+        // MỚI: Nhận thêm biến avatar từ giao diện gửi lên
+        const { phone, email, otp, avatar } = req.body;
+
         let user = await User.findById(req.user.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng."});
 
-        // Nếu người dùng thay đổi Email, cần kiểm tra OTP
         if (email && email !== user.email) {
              const cached = otpCache[email];
             if (!cached) return res.status(400).json({ success: false, message: "Vui lòng ấn gửi mã OTP để xác nhận Email mới!" });
             if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN (quá 60s)! Vui lòng gửi lại mã." });
             if (cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP xác nhận Email không chính xác!" });
-            
+
             user.email = email;
-            delete otpCache[email]; // Xóa OTP sau khi dùng
+            delete otpCache[email]; 
         }
 
-        // Cập nhật SĐT nếu có
         if (phone) user.phone = phone;
+        // MỚI: Nếu có ảnh avatar gửi lên thì lưu vào user
+        if (avatar) user.avatar = avatar;
 
         await user.save();
-        res.json({ success: true, message: "Cập nhật thông tin thành công!", user: { username: user.username, fullName: user.fullName, role: user.role, email: user.email, phone: user.phone, cart: user.cart, createdAt: user.createdAt } });
+        // MỚI: Trả về cục dữ liệu có chứa thuộc tính avatar
+        res.json({ success: true, message: "Cập nhật thông tin thành công!", user: { username: user.username, fullName: user.fullName, role: user.role, email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt } });
 
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
