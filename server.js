@@ -918,3 +918,29 @@ app.delete('/api/users/me', verifyToken, async (req, res) => {
         res.status(500).json({ success: false, message: "Lỗi hệ thống khi xóa tài khoản!" }); 
     }
 });
+
+// ==========================================
+// 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM (ĐÃ NÂNG CẤP AVATAR)
+// ==========================================
+app.post('/api/products/:id/comments', async (req, res) => {
+    try {
+        // MỚI: Nhận thêm biến userAvatar
+        const { userName, userAvatar, content, rating, img } = req.body;
+        const product = await Product.findById(req.params.id);
+        if (!product) return res.status(404).json({ success: false, message: "Sản phẩm không tồn tại!" });
+
+        const newComment = {
+            id: Date.now().toString(),
+            userName: userName || "Khách",
+            userAvatar: userAvatar || "", // MỚI: Lưu ảnh đại diện vào Database
+            content: content,
+            rating: rating || 5,
+            img: img || null,
+            date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})
+        };
+
+        product.comments.push(newComment);
+        await product.save();
+        res.json({ success: true, message: "Đã gửi bình luận!", comments: product.comments });
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+});
