@@ -516,11 +516,10 @@ app.delete('/api/products/:id', async (req, res) => {
 app.put('/api/products/:id/view', async (req, res) => {
     try {
         const key = req.params.id;
-        // Dò tìm theo cả _id gốc hoặc productId tự tạo
         let query = mongoose.Types.ObjectId.isValid(key) ? { _id: key } : { productId: key };
 
-        // Tìm sản phẩm và cộng thêm 1 vào views
-        const sp = await Product.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true });
+        // ĐÃ SỬA: Đổi { new: true } thành { returnDocument: 'after' }
+        const sp = await Product.findOneAndUpdate(query, { $inc: { views: 1 } }, { returnDocument: 'after' });
 
         if (sp) res.json({ success: true, views: sp.views });
         else res.status(404).json({ success: false });
@@ -808,15 +807,20 @@ app.put('/api/orders/:id/status', async (req, res) => {
 // ==========================================
 // 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM
 // ==========================================
+// ==========================================
+// 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM (ĐÃ NÂNG CẤP AVATAR)
+// ==========================================
 app.post('/api/products/:id/comments', async (req, res) => {
     try {
-        const { userName, content, rating, img } = req.body;
+        // ĐÃ SỬA: Thêm biến userAvatar vào đây
+        const { userName, userAvatar, content, rating, img } = req.body;
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ success: false, message: "Sản phẩm không tồn tại!" });
 
         const newComment = {
             id: Date.now().toString(),
             userName: userName || "Khách",
+            userAvatar: userAvatar || "", // ĐÃ SỬA: Lưu ảnh đại diện vào Database
             content: content,
             rating: rating || 5,
             img: img || null,
