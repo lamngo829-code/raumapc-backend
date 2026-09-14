@@ -268,7 +268,8 @@ app.post('/api/login', async (req, res) => {
         // ĐỐI VỚI ADMIN: Đăng nhập thẳng, bỏ qua OTP
         if (isRole === 'admin') {
             const token = jwt.sign({ id: user._id, username: user.username, role: isRole }, JWT_SECRET, { expiresIn: '7d' });
-            return res.json({ success: true, token, user: { username: user.username, fullName: user.fullName, role: isRole }, requireOtp: false });
+            // ĐÃ BỔ SUNG avatar: user.avatar
+            return res.json({ success: true, token, user: { username: user.username, fullName: user.fullName, role: isRole, avatar: user.avatar }, requireOtp: false });
         }
 
         // ĐỐI VỚI KHÁCH HÀNG: Tạo mã OTP và gửi Mail
@@ -312,8 +313,9 @@ app.post('/api/login-verify', async (req, res) => {
 
         const user = await User.findOne({ email: email });
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
-        
-        const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, createdAt: user.createdAt };
+
+        // ĐÃ BỔ SUNG avatar: user.avatar
+        const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
 
         delete otpCache[email]; 
         res.json({ success: true, token, user: userData });
@@ -917,30 +919,4 @@ app.delete('/api/users/me', verifyToken, async (req, res) => {
     } catch (err) { 
         res.status(500).json({ success: false, message: "Lỗi hệ thống khi xóa tài khoản!" }); 
     }
-});
-
-// ==========================================
-// 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM (ĐÃ NÂNG CẤP AVATAR)
-// ==========================================
-app.post('/api/products/:id/comments', async (req, res) => {
-    try {
-        // MỚI: Nhận thêm biến userAvatar
-        const { userName, userAvatar, content, rating, img } = req.body;
-        const product = await Product.findById(req.params.id);
-        if (!product) return res.status(404).json({ success: false, message: "Sản phẩm không tồn tại!" });
-
-        const newComment = {
-            id: Date.now().toString(),
-            userName: userName || "Khách",
-            userAvatar: userAvatar || "", // MỚI: Lưu ảnh đại diện vào Database
-            content: content,
-            rating: rating || 5,
-            img: img || null,
-            date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'})
-        };
-
-        product.comments.push(newComment);
-        await product.save();
-        res.json({ success: true, message: "Đã gửi bình luận!", comments: product.comments });
-    } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
