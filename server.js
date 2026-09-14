@@ -60,9 +60,10 @@ mongoose.connect(process.env.MONGO_URI)
 // ==========================================
 // Khuôn Sản phẩm
 const productSchema = new mongoose.Schema({
-    productId: String, // MỚI THÊM: Lưu mã ID tùy chỉnh
+    productId: String, 
     name: String, price: String, img: String, warranty: String,
     specs: String, description: String, category: String, brand: String,
+    views: { type: Number, default: 0 }, // MỚI THÊM: Lưu lượt xem
     comments: { type: Array, default: [] }
 });
 productSchema.index({ name: 'text' }); 
@@ -428,6 +429,7 @@ app.get('/api/products', async (req, res) => {
             brand: sp.brand, 
             specs: sp.specs,
             description: sp.description,
+            views: sp.views || 0,
             comments: sp.comments 
         }));
         res.json(formattedProducts); 
@@ -505,6 +507,21 @@ app.delete('/api/products/:id', async (req, res) => {
     } catch (err) { 
         res.status(500).json({ message: "Lỗi xóa sản phẩm!" }); 
     }
+});
+
+// API TỰ ĐỘNG TĂNG LƯỢT XEM
+app.put('/api/products/:id/view', async (req, res) => {
+    try {
+        const key = req.params.id;
+        // Dò tìm theo cả _id gốc hoặc productId tự tạo
+        let query = mongoose.Types.ObjectId.isValid(key) ? { _id: key } : { productId: key };
+
+        // Tìm sản phẩm và cộng thêm 1 vào views
+        const sp = await Product.findOneAndUpdate(query, { $inc: { views: 1 } }, { new: true });
+
+        if (sp) res.json({ success: true, views: sp.views });
+        else res.status(404).json({ success: false });
+    } catch (err) { res.status(500).json({ success: false }); }
 });
 
 // ==========================================
