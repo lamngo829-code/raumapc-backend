@@ -7,7 +7,8 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// CHỈ CHO PHÉP WEBSITE CỦA BẠN (VERCEL) VÀ LOCALHOST ĐƯỢC GỌI API
+app.set('trust proxy', 1);
+
 const allowedOrigins = ['https://raumapc-frontend.vercel.app', 'http://127.0.0.1:5500', 'http://localhost:5500'];
 app.use(cors({
     origin: function (origin, callback) {
