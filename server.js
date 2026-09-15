@@ -668,6 +668,13 @@ app.post('/api/orders', async (req, res) => {
             body: JSON.stringify(emailData)
         }).catch(err => console.log("Lỗi gửi mail tự động:", err));
 
+        // 6. DỌN SẠCH GIỎ HÀNG TRÊN DATABASE NẾU LÀ THÀNH VIÊN
+        const userCheck = await User.findOne({ username: newOrder.account });
+        if (userCheck) {
+            userCheck.cart = [];
+            await userCheck.save();
+        }
+
         res.json({ message: "Đặt hàng thành công!" });
     } catch (error) { res.status(500).json({ message: "Lỗi khi lưu đơn!" }); }
 });
