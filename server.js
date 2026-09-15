@@ -806,6 +806,18 @@ app.put('/api/orders/:id/status', async (req, res) => {
 });
 
 // ==========================================
+// API XÓA ĐƠN HÀNG VĨNH VIỄN
+// ==========================================
+app.delete('/api/orders/:id', async (req, res) => {
+    try {
+        await Order.findOneAndDelete({ orderId: req.params.id });
+        res.json({ success: true, message: "Đã xóa đơn hàng thành công!" });
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Lỗi hệ thống khi xóa đơn hàng!" }); 
+    }
+});
+
+// ==========================================
 // 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM
 // ==========================================
 // ==========================================
