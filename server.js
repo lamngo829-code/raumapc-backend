@@ -1,9 +1,10 @@
 require('dotenv').config();
+const geoip = require('geoip-lite');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs'); 
-const jwt = require('jsonwebtoken'); 
+const jwt = require('jsonwebtoken');
 
 const app = express();
 
@@ -41,6 +42,26 @@ const authLimiter = rateLimit({
     max: 5, 
     message: { success: false, message: "Phát hiện dấu hiệu Spam! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." }
 });
+
+// ==========================================
+// KHIÊN 3: CHẶN IP NƯỚC NGOÀI (GEO-BLOCKING)
+// ==========================================
+const geoBlocker = (req, res, next) => {
+    let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    if (ip) {
+        ip = ip.split(',')[0].trim();
+        const geo = geoip.lookup(ip);
+        if (geo && geo.country !== 'VN' && ip !== '::1' && ip !== '127.0.0.1') {
+            console.log(`🚨 Chặn truy cập từ quốc gia: ${geo.country} (IP: ${ip})`);
+            return res.status(403).json({
+                success: false,
+                message: "Hệ thống Rau Má PC hiện tại chỉ hỗ trợ truy cập và đặt hàng từ lãnh thổ Việt Nam."
+            });
+        }
+    }
+    next();
+};
+app.use(geoBlocker);
 
 // Áp dụng Khiên 2 cho các API nhạy cảm
 app.use('/api/login', authLimiter);
