@@ -645,6 +645,24 @@ app.post('/api/orders', async (req, res) => {
             }
         };
 
+        // 5. GỬI THÊM 1 BẢN SAO EMAIL CHO ADMIN ĐỂ NHẬN BIẾT CÓ ĐƠN
+        const adminEmailData = {
+            service_id: process.env.EMAILJS_SERVICE_ID,
+            template_id: process.env.EMAILJS_TEMPLATE_ID, 
+            user_id: process.env.EMAILJS_USER_ID,
+            accessToken: process.env.EMAILJS_TOKEN,
+            template_params: {
+                to_email: "lamngo829@gmail.com", // QUAN TRỌNG: Thay bằng Email thật của bạn (Admin)
+                subject: `🚨 [CÓ ĐƠN HÀNG MỚI] #${newOrder.orderId} từ khách hàng ${cusName}`,
+                message: fullHtmlContent // Gửi kèm nguyên cái bill chi tiết cho Admin xem luôn
+            }
+        };
+
+        fetch('https://api.emailjs.com/api/v1.0/email/send', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(adminEmailData)
+        }).catch(err => console.log("Lỗi báo cáo Admin:", err));
+
         fetch('https://api.emailjs.com/api/v1.0/email/send', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(emailData)
@@ -817,9 +835,6 @@ app.delete('/api/orders/:id', async (req, res) => {
     }
 });
 
-// ==========================================
-// 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM
-// ==========================================
 // ==========================================
 // 9. API THÊM BÌNH LUẬN VÀO SẢN PHẨM (ĐÃ NÂNG CẤP AVATAR)
 // ==========================================
