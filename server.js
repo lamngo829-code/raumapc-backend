@@ -86,7 +86,8 @@ const productSchema = new mongoose.Schema({
     name: String, price: String, img: String, warranty: String,
     specs: String, description: String, category: String, brand: String,
     views: { type: Number, default: 0 },
-    comments: { type: Array, default: [] }
+    comments: { type: Array, default: [] },
+    gallery: { type: Array, default: [] }
 });
 productSchema.index({ name: 'text' }); 
 const Product = mongoose.model('Product', productSchema);
@@ -455,7 +456,8 @@ app.get('/api/products', async (req, res) => {
             specs: sp.specs,
             description: sp.description,
             views: sp.views || 0,
-            comments: sp.comments 
+            comments: sp.comments,
+            gallery: sp.gallery || []
         }));
         res.json(formattedProducts); 
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
@@ -491,7 +493,8 @@ app.get('/api/products/detail/:id', async (req, res) => {
             brand: sp.brand,
             specs: sp.specs,
             description: sp.description,
-            comments: sp.comments
+            comments: sp.comments,
+            gallery: sp.gallery || []
         });
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
