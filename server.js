@@ -105,7 +105,7 @@ const userSchema = new mongoose.Schema({
     username: { type: String, unique: true, required: true },
     password: { type: String, required: true },
     phone: { type: String, required: true }, 
-    email: { type: String, required: true }, 
+    email: { type: String, required: true, index: true }, 
     role: { type: String, default: 'user' },
     cart: { type: Array, default: [] },
     avatar: { type: String, default: '' },
@@ -890,6 +890,17 @@ app.post('/api/products/:id/comments', async (req, res) => {
         await product.save();
         res.json({ success: true, message: "Đã gửi bình luận!", comments: product.comments });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+});
+
+// ==========================================
+// ENDPOINT GIỮ SERVER "THỨC" (KEEP-ALIVE)
+// ==========================================
+// Endpoint siêu nhẹ, KHÔNG chạm tới MongoDB, dùng để một dịch vụ ping ngoài
+// (UptimeRobot, cron-job.org...) gọi định kỳ ~10-14 phút/lần, giúp Render Free
+// không bao giờ spin-down server -> tránh tình trạng lần đăng nhập đầu tiên
+// sau một thời gian không ai truy cập bị chờ 30-60 giây "đánh thức" server.
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
 });
 
 app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
