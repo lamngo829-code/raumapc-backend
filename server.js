@@ -7,7 +7,6 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
 const app = express();
-
 app.set('trust proxy', 1);
 
 const allowedOrigins = ['https://raumapc-frontend.vercel.app', 'http://127.0.0.1:5500', 'http://localhost:5500'];
@@ -22,48 +21,29 @@ app.use(cors({
     credentials: true
 }));
 
-// HẠ GIỚI HẠN DỮ LIỆU XUỐNG 5MB ĐỂ CHỐNG SPAM SẬP MÁY CHỦ
 app.use(express.json({ limit: '5mb' }));
 app.use(express.urlencoded({ limit: '5mb', extended: true }));
 
 const rateLimit = require('express-rate-limit');
 
-// Khiên 1: Giới hạn toàn hệ thống (Max 300 yêu cầu / 15 phút cho mỗi IP)
-const globalLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, 
-    max: 300,
-    message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" }
-});
+const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" } });
 app.use(globalLimiter);
 
-// Khiên 2: Khóa chặt cổng Đăng nhập & Gửi OTP (Max 5 lần / 5 phút)
-const authLimiter = rateLimit({
-    windowMs: 5 * 60 * 1000,
-    max: 5, 
-    message: { success: false, message: "Phát hiện dấu hiệu Spam! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." }
-});
+const authLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 5, message: { success: false, message: "Phát hiện dấu hiệu Spam! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." } });
 
-// ==========================================
-// KHIÊN 3: CHẶN IP NƯỚC NGOÀI (GEO-BLOCKING)
-// ==========================================
 const geoBlocker = (req, res, next) => {
     let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (ip) {
         ip = ip.split(',')[0].trim();
         const geo = geoip.lookup(ip);
         if (geo && geo.country !== 'VN' && ip !== '::1' && ip !== '127.0.0.1') {
-            console.log(`🚨 Chặn truy cập từ quốc gia: ${geo.country} (IP: ${ip})`);
-            return res.status(403).json({
-                success: false,
-                message: "Hệ thống Rau Má PC hiện tại chỉ hỗ trợ truy cập và đặt hàng từ lãnh thổ Việt Nam."
-            });
+            return res.status(403).json({ success: false, message: "Hệ thống Rau Má PC hiện tại chỉ hỗ trợ truy cập và đặt hàng từ lãnh thổ Việt Nam." });
         }
     }
     next();
 };
 app.use(geoBlocker);
 
-// Áp dụng Khiên 2 cho các API nhạy cảm
 app.use('/api/login', authLimiter);
 app.use('/api/request-otp', authLimiter);
 app.use('/api/request-register-otp', authLimiter);
@@ -78,12 +58,12 @@ mongoose.connect(process.env.MONGO_URI)
     .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
 // ==========================================
-// 2. KHUÔN MẪU DỮ LIỆU (ĐÃ TÁCH BIỆT ADMIN VÀ USER)
+// 2. KHUÔN MẪU DỮ LIỆU
 // ==========================================
-// Khuôn Sản phẩm
 const productSchema = new mongoose.Schema({
     productId: String, 
     name: String, price: String, img: String, warranty: String,
+    status: { type: String, default: 'Còn hàng' }, // <-- LƯU TÌNH TRẠNG KHO
     specs: String, description: String, category: String, brand: String,
     views: { type: Number, default: 0 },
     comments: { type: Array, default: [] },
@@ -92,85 +72,42 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ name: 'text' }); 
 const Product = mongoose.model('Product', productSchema);
 
-// Khuôn Đơn hàng
-const orderSchema = new mongoose.Schema({
-    orderId: String, date: String, username: String, account: String,
-    email: String, items: Array, total: Number, status: String
-});
+const orderSchema = new mongoose.Schema({ orderId: String, date: String, username: String, account: String, email: String, items: Array, total: Number, status: String });
 const Order = mongoose.model('Order', orderSchema);
 
-// Khuôn Khách hàng (User)
-const userSchema = new mongoose.Schema({
-    fullName: { type: String, required: true },
-    username: { type: String, unique: true, required: true },
-    password: { type: String, required: true },
-    phone: { type: String, required: true }, 
-    email: { type: String, required: true, index: true }, 
-    role: { type: String, default: 'user' },
-    cart: { type: Array, default: [] },
-    avatar: { type: String, default: '' },
-    createdAt: { type: Date, default: Date.now } 
-});
+const userSchema = new mongoose.Schema({ fullName: { type: String, required: true }, username: { type: String, unique: true, required: true }, password: { type: String, required: true }, phone: { type: String, required: true }, email: { type: String, required: true, index: true }, role: { type: String, default: 'user' }, cart: { type: Array, default: [] }, avatar: { type: String, default: '' }, createdAt: { type: Date, default: Date.now } });
 const User = mongoose.model('User', userSchema);
 
-// Khuôn Quản trị viên (Admin)
-const adminSchema = new mongoose.Schema({
-    fullName: { type: String, required: true },
-    username: { type: String, unique: true, required: true },
-    password: { type: String, required: true },
-    role: { type: String, default: 'admin' }
-});
+const adminSchema = new mongoose.Schema({ fullName: { type: String, required: true }, username: { type: String, unique: true, required: true }, password: { type: String, required: true }, role: { type: String, default: 'admin' } });
 const Admin = mongoose.model('Admin', adminSchema);
 
-// Khuôn Cài Đặt Website (Settings) - DÙNG CHO CÀI ĐẶT TRANG CHỦ
-const settingSchema = new mongoose.Schema({
-    key: { type: String, unique: true },
-    data: Object
-});
+const settingSchema = new mongoose.Schema({ key: { type: String, unique: true }, data: Object });
 const Setting = mongoose.model('Setting', settingSchema);
 
-// ==========================================
-// CỬA AN NINH (MIDDLEWARE)
-// ==========================================
 const verifyToken = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ message: "Bạn chưa đăng nhập!" });
     try {
         const decoded = jwt.verify(token.split(" ")[1], JWT_SECRET);
-        
-        let user = await User.findById(decoded.id);
-        if (!user) user = await Admin.findById(decoded.id);
-        
-        if (!user) {
-            return res.status(401).json({ message: "Tài khoản đã bị xóa khỏi hệ thống!", accountDeleted: true });
-        }
-
+        let user = await User.findById(decoded.id) || await Admin.findById(decoded.id);
+        if (!user) return res.status(401).json({ message: "Tài khoản đã bị xóa khỏi hệ thống!", accountDeleted: true });
         req.user = decoded; 
         next();
     } catch (err) { return res.status(401).json({ message: "Phiên đăng nhập hết hạn!" }); }
 };
 
-app.get('/api/auth/verify', verifyToken, (req, res) => {
-    res.json({ success: true });
-});
+app.get('/api/auth/verify', verifyToken, (req, res) => { res.json({ success: true }); });
 
 // ==========================================
-// TẠO ADMIN 
+// TẠO ADMIN & XÁC THỰC
 // ==========================================
 app.get('/api/setup-admin', async (req, res) => {
     try {
         const existingAdmin = await Admin.findOne({ username: 'admin' });
         if (existingAdmin) return res.send("<h3>Tài khoản Admin đã tồn tại trong Database!</h3>");
-
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(process.env.ADMIN_PASS, salt);
-
-        const newAdmin = new Admin({
-            fullName: "Tổng Giám Đốc Rau Má",
-            username: "admin",
-            password: hashedPassword,
-            role: "admin"
-        });
+        const newAdmin = new Admin({ fullName: "Tổng Giám Đốc Rau Má", username: "admin", password: hashedPassword, role: "admin" });
         await newAdmin.save();
         res.send("<h3>✅ Đã khởi tạo biệt thự Admin thành công!</h3><p>Tài khoản: <b>admin</b></p><p>Mật khẩu: <b>Lamngo@395508622</b></p><p>Vui lòng đăng nhập trên website!</p>");
     } catch (err) { res.status(500).send("Lỗi hệ thống: " + err.message); }
@@ -178,43 +115,30 @@ app.get('/api/setup-admin', async (req, res) => {
 
 app.post('/api/admin/create', verifyToken, async (req, res) => {
     try {
-        if (req.user.role !== 'admin') {
-            return res.status(403).json({ success: false, message: "Cảnh báo: Chỉ Admin mới có quyền tạo Admin khác!" });
-        }
-
+        if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Cảnh báo: Chỉ Admin mới có quyền tạo Admin khác!" });
         const { fullName, username, password } = req.body;
         if (!fullName || !username || !password) return res.status(400).json({ success: false, message: "Vui lòng cung cấp đủ Tên, Tài khoản và Mật khẩu!" });
-
         const existingAdmin = await Admin.findOne({ username });
         if (existingAdmin) return res.status(400).json({ success: false, message: "Tài khoản Admin này đã tồn tại!" });
-
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-
         const newAdmin = new Admin({ fullName: fullName, username: username, password: hashedPassword, role: "admin" });
         await newAdmin.save();
         res.json({ success: true, message: `Đã tạo thành công Admin: ${fullName} (${username})` });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống: " + err.message }); }
 });
 
-// ==========================================
-// XÁC THỰC OTP & ĐĂNG NHẬP
-// ==========================================
 const otpCache = {};
-
 app.post('/api/request-register-otp', async (req, res) => {
     try {
         const { email, username } = req.body;
         const existingUser = await User.findOne({ $or: [{ email: email }, { username: username }] });
         if (existingUser) return res.status(400).json({ success: false, message: "Email hoặc Tên đăng nhập đã được sử dụng!" });
-
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-
         const htmlContent = `<div style="font-family: Arial; padding: 20px; border: 1px solid #eee; border-radius: 10px;"><h2 style="color: #1435c3;">MÃ OTP XÁC NHẬN ĐĂNG KÝ</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: email, subject: '[Rau Má PC] Mã OTP Đăng Ký Tài Khoản', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
-
         res.json({ success: true, message: "Mã OTP đăng ký đã được gửi đến Email!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -226,10 +150,8 @@ app.post('/api/register', async (req, res) => {
         if (!cached) return res.status(400).json({ success: false, message: "Vui lòng ấn gửi mã OTP trước!" });
         if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN!" });
         if (cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
-
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-
         const newUser = new User({ fullName, username, password: hashedPassword, phone, email });
         await newUser.save();
         delete otpCache[email]; 
@@ -242,14 +164,8 @@ app.post('/api/login', async (req, res) => {
         const loginId = req.body.username; 
         let user = await User.findOne({ $or: [{ username: loginId }, { email: loginId }] });
         let isRole = 'user';
-
-        if (!user) {
-            user = await Admin.findOne({ username: loginId });
-            isRole = 'admin';
-        }
-
+        if (!user) { user = await Admin.findOne({ username: loginId }); isRole = 'admin'; }
         if (!user) return res.status(401).json({ success: false, message: "Sai tài khoản hoặc Email!" });
-
         const isMatch = await bcrypt.compare(req.body.password, user.password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Sai mật khẩu!" });
 
@@ -260,11 +176,9 @@ app.post('/api/login', async (req, res) => {
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-
         const htmlContent = `<div style="font-family: Arial; padding: 20px; border: 1px solid #eee; border-radius: 10px;"><h2 style="color: #1435c3;">MÃ OTP ĐĂNG NHẬP BẢO MẬT</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Đăng Nhập', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
-
         res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
@@ -276,11 +190,9 @@ app.post('/api/login-verify', async (req, res) => {
         if (!cached) return res.status(400).json({ success: false, message: "Phiên đăng nhập không hợp lệ!" });
         if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN!" });
         if (cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
-
         const user = await User.findOne({ email: email });
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
         const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
-
         delete otpCache[email]; 
         res.json({ success: true, token, user: userData });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
@@ -291,14 +203,11 @@ app.post('/api/request-otp', async (req, res) => {
         const { email } = req.body;
         const user = await User.findOne({ email: email });
         if (!user) return res.status(404).json({ success: false, message: "Email không tồn tại!" });
-
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-
         const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ XÁC NHẬN BẢO MẬT (OTP)</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Xác Nhận Bảo Mật', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
-
         res.json({ success: true, message: "Mã OTP đã gửi qua Email!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -308,12 +217,10 @@ app.post('/api/forgot-password-verify', async (req, res) => {
         const { email, otp, newPassword } = req.body;
         const cached = otpCache[email];
         if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
-
         const user = await User.findOne({ email: email });
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        
         delete otpCache[email]; 
         res.json({ success: true, message: "Khôi phục mật khẩu thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
@@ -324,15 +231,12 @@ app.post('/api/change-password-verify', verifyToken, async (req, res) => {
         const { oldPassword, newPassword, otp, email } = req.body;
         const cached = otpCache[email];
         if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
-
         let user = await User.findById(req.user.id) || await Admin.findById(req.user.id);
         const isMatch = await bcrypt.compare(oldPassword, user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Mật khẩu cũ không chính xác!" });
-
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-
         delete otpCache[email];
         res.json({ success: true, message: "Đổi mật khẩu thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
@@ -348,6 +252,7 @@ app.get('/api/products', async (req, res) => {
             id: sp._id.toString(),
             productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), 
             name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty,
+            status: sp.status || 'Còn hàng', // <-- TRUYỀN TÌNH TRẠNG XUỐNG GIAO DIỆN
             category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description,
             views: sp.views || 0, comments: sp.comments, gallery: sp.gallery || []
         }));
@@ -365,17 +270,16 @@ app.get('/api/products/detail/:id', async (req, res) => {
         res.json({
             id: sp._id.toString(), productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
             name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty,
+            status: sp.status || 'Còn hàng', // <-- TRUYỀN TÌNH TRẠNG XUỐNG TRANG CHI TIẾT
             category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description,
             comments: sp.comments, gallery: sp.gallery || []
         });
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
 
-// --- HÀM TẠO ID TỰ ĐỘNG THÔNG MINH (PHIÊN BẢN CẬP NHẬT) ---
 async function generateAutoId(categoryString) {
     const cat1 = categoryString ? categoryString.split(',')[0].trim().toLowerCase() : '';
     let prefix = 'SP';
-
     if (['cpu', 'intel', 'amd'].includes(cat1)) prefix = 'CPU';
     else if (['vga', 'vga-nvidia', 'vga-amd'].includes(cat1)) prefix = 'VGA';
     else if (cat1 === 'main') prefix = 'M';
@@ -393,7 +297,6 @@ async function generateAutoId(categoryString) {
         const latestProduct = await Product.findOne({ productId: new RegExp('^' + prefix + '\\d+$') })
             .sort({ productId: -1 })
             .collation({ locale: "en_US", numericOrdering: true }); 
-
         let nextNumber = 1;
         if (latestProduct && latestProduct.productId) {
             const currentNumStr = latestProduct.productId.replace(prefix, '');
@@ -401,16 +304,12 @@ async function generateAutoId(categoryString) {
             if (!isNaN(currentNum)) nextNumber = currentNum + 1;
         }
         return prefix + String(nextNumber).padStart(7, '0');
-    } catch (error) {
-        return prefix + String(Math.floor(Math.random() * 10000000)).padStart(7, '0'); 
-    }
+    } catch (error) { return prefix + String(Math.floor(Math.random() * 10000000)).padStart(7, '0'); }
 }
 
 app.post('/api/products', async (req, res) => {
     try {
-        if (!req.body.productId || req.body.productId.trim() === '') {
-            req.body.productId = await generateAutoId(req.body.category);
-        }
+        if (!req.body.productId || req.body.productId.trim() === '') req.body.productId = await generateAutoId(req.body.category);
         const newProduct = new Product(req.body);
         await newProduct.save();
         res.json({ message: "Thêm sản phẩm thành công!" });
@@ -419,9 +318,7 @@ app.post('/api/products', async (req, res) => {
 
 app.put('/api/products/:id', async (req, res) => {
     try {
-        if (!req.body.productId || req.body.productId.trim() === '') {
-            req.body.productId = await generateAutoId(req.body.category);
-        }
+        if (!req.body.productId || req.body.productId.trim() === '') req.body.productId = await generateAutoId(req.body.category);
         await Product.findByIdAndUpdate(req.params.id, req.body);
         res.json({ message: "Cập nhật thành công!" });
     } catch (err) { res.status(500).json({ message: "Lỗi cập nhật!" }); }
@@ -445,7 +342,7 @@ app.put('/api/products/:id/view', async (req, res) => {
 });
 
 // ==========================================
-// API ĐƠN HÀNG, DOANH THU & GỬI MAIL HÓA ĐƠN
+// API ĐƠN HÀNG, DOANH THU & ĐỒNG BỘ
 // ==========================================
 app.post('/api/orders', async (req, res) => {
     try {
@@ -549,11 +446,9 @@ app.post('/api/request-email-update-otp', verifyToken, async (req, res) => {
 
         const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
         otpCache[newEmail] = { code: otpCode, expiresAt: Date.now() + 60000 };
-
         const htmlContent = `<div style="padding: 20px;"><h2>XÁC NHẬN ĐỔI EMAIL</h2><p>Mã của bạn: <b>${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: newEmail, subject: '[Rau Má PC] Đổi Email', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
-
         res.json({ success: true, message: "Đã gửi mã OTP!" });
     } catch (err) { res.status(500).json({ success: false }); }
 });
@@ -587,9 +482,6 @@ app.delete('/api/users/me', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// ==========================================
-// API LƯU VÀ TẢI CẤU HÌNH TRANG CHỦ GLOBAL (LƯU LÊN CLOUD MONGODB)
-// ==========================================
 app.get('/api/settings/home', async (req, res) => {
     try {
         const homeSettings = await Setting.findOne({ key: 'homeConfig' });
@@ -600,16 +492,11 @@ app.get('/api/settings/home', async (req, res) => {
 app.put('/api/settings/home', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Từ chối quyền truy cập!" });
     try {
-        await Setting.findOneAndUpdate(
-            { key: 'homeConfig' },
-            { data: req.body },
-            { upsert: true, new: true } // Nếu chưa có thì tạo mới, có rồi thì ghi đè
-        );
+        await Setting.findOneAndUpdate({ key: 'homeConfig' }, { data: req.body }, { upsert: true, new: true });
         res.json({ success: true, message: "Đã đồng bộ trang chủ lên Cloud!" });
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// Endpoint giữ Server thức
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date().toISOString() }); });
 
 app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
