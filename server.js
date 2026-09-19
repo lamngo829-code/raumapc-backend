@@ -5,6 +5,7 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
+const crypto = require('crypto'); // MỚI: Thư viện mã hóa chuẩn để sinh OTP an toàn
 
 const app = express();
 app.set('trust proxy', 1);
@@ -21,42 +22,16 @@ app.use(cors({
     credentials: true
 }));
 
-const express = require('express');
-const multer = require('multer');
-const app = express();
-
-const upload = multer({
-  dest: 'uploads/', // Thư mục lưu file tạm
-  limits: {
-    fileSize: 5 * 1024 * 1024, // Giới hạn 5MB cho MỖI BỨC ẢNH
-    files: 20 // Cho phép lưu tối đa 20 ảnh cùng lúc mỗi request
-  },
-  fileFilter: (req, file, cb) => {
-    // Bảo mật: Chỉ cho phép định dạng ảnh, chặn các file thực thi (.exe, .sh,...)
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Định dạng file không hợp lệ, chỉ cho phép ảnh!'), false);
-    }
-  }
-});
-
-// Route xử lý việc upload hàng chục bức ảnh
-app.post('/upload-images', upload.array('photos', 20), (req, res) => {
-  res.status(200).json({ 
-    message: 'Upload thành công!', 
-    files: req.files.length 
-  });
-});
-
-app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ limit: '2mb', extended: true }));
+// BẢO MẬT PAYLOAD: 10MB là giới hạn "Vàng". Đủ để lưu 15 ảnh Base64 đã nén qua Canvas, nhưng đủ nhỏ để chặn đứng các cuộc tấn công DoS.
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 
 const rateLimit = require('express-rate-limit');
 const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" } });
 app.use(globalLimiter);
 
-const authLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 5, message: { success: false, message: "Phát hiện dấu hiệu Spam! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." } });
+// BẢO MẬT BRUTE-FORCE: Siết chặt giới hạn Spam cho mọi API liên quan đến xác thực
+const authLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 5, message: { success: false, message: "Phát hiện dấu hiệu dò mật khẩu/OTP! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." } });
 
 const geoBlocker = (req, res, next) => {
     let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
@@ -70,7 +45,11 @@ const geoBlocker = (req, res, next) => {
     next();
 };
 app.use(geoBlocker);
+
+// KÍCH HOẠT LÁ CHẮN BRUTE-FORCE CHO TOÀN BỘ API QUAN TRỌNG
 app.use('/api/login', authLimiter);
+app.use('/api/login-verify', authLimiter);
+app.use('/api/register', authLimiter);
 app.use('/api/request-otp', authLimiter);
 app.use('/api/request-register-otp', authLimiter);
 
@@ -96,7 +75,6 @@ const Product = mongoose.model('Product', productSchema);
 const orderSchema = new mongoose.Schema({ orderId: String, date: String, username: String, account: String, email: String, items: Array, total: Number, status: String, paymentMethod: String });
 const Order = mongoose.model('Order', orderSchema);
 
-// ĐÃ THÊM: isLocked (Trạng thái khóa) và loginHistory (Nhật ký đăng nhập)
 const userSchema = new mongoose.Schema({ 
     fullName: { type: String, required: true }, 
     username: { type: String, unique: true, required: true }, 
@@ -121,7 +99,6 @@ const Setting = mongoose.model('Setting', settingSchema);
 const couponSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, discountPercent: { type: Number, required: true }, isActive: { type: Boolean, default: true }, createdAt: { type: Date, default: Date.now } });
 const Coupon = mongoose.model('Coupon', couponSchema);
 
-// BỘ LỌC BẢO VỆ (ĐÁ VĂNG USER NẾU BỊ KHÓA)
 const verifyToken = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ message: "Bạn chưa đăng nhập!" });
@@ -129,10 +106,7 @@ const verifyToken = async (req, res, next) => {
         const decoded = jwt.verify(token.split(" ")[1], JWT_SECRET);
         let user = await User.findById(decoded.id) || await Admin.findById(decoded.id);
         if (!user) return res.status(401).json({ message: "Tài khoản đã bị xóa khỏi hệ thống!", accountDeleted: true });
-        
-        // NẾU ADMIN ĐÃ KHÓA, ÉP BUỘC LOGOUT NGAY LẬP TỨC DÙ CÒN TOKEN
         if (user.isLocked) return res.status(401).json({ message: "Tài khoản của bạn đã bị khóa do vi phạm!", accountDeleted: true });
-        
         req.user = decoded; next();
     } catch (err) { return res.status(401).json({ message: "Phiên đăng nhập hết hạn!" }); }
 };
@@ -156,11 +130,11 @@ app.post('/api/admin/create', verifyToken, async (req, res) => {
         if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Cảnh báo: Chỉ Admin mới có quyền tạo Admin khác!" });
         const { fullName, username, password } = req.body;
         if (!fullName || !username || !password) return res.status(400).json({ success: false, message: "Vui lòng cung cấp đủ thông tin!" });
-        const existingAdmin = await Admin.findOne({ username });
+        const existingAdmin = await Admin.findOne({ username: String(username) });
         if (existingAdmin) return res.status(400).json({ success: false, message: "Tài khoản Admin này đã tồn tại!" });
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        const newAdmin = new Admin({ fullName: fullName, username: username, password: hashedPassword, role: "admin" });
+        const newAdmin = new Admin({ fullName, username, password: hashedPassword, role: "admin" });
         await newAdmin.save();
         res.json({ success: true, message: `Đã tạo thành công Admin: ${fullName} (${username})` });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
@@ -169,11 +143,17 @@ app.post('/api/admin/create', verifyToken, async (req, res) => {
 const otpCache = {};
 app.post('/api/request-register-otp', async (req, res) => {
     try {
-        const { email, username } = req.body;
+        // CHỐNG NoSQL INJECTION: Ép kiểu dữ liệu về String
+        const email = String(req.body.email);
+        const username = String(req.body.username);
+        
         const existingUser = await User.findOne({ $or: [{ email: email }, { username: username }] });
         if (existingUser) return res.status(400).json({ success: false, message: "Email hoặc Tên đăng nhập đã được sử dụng!" });
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        // SINH OTP BẢO MẬT: Dùng crypto thay cho Math.random()
+        const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
+        
         const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ OTP XÁC NHẬN ĐĂNG KÝ</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: email, subject: '[Rau Má PC] Mã OTP Đăng Ký Tài Khoản', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
@@ -184,29 +164,31 @@ app.post('/api/request-register-otp', async (req, res) => {
 app.post('/api/register', async (req, res) => {
     try {
         const { fullName, username, password, phone, email, otp } = req.body;
-        const cached = otpCache[email];
-        if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
+        const safeEmail = String(email);
+        const cached = otpCache[safeEmail];
+        if (!cached || Date.now() > cached.expiresAt || cached.code !== String(otp)) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
-        const newUser = new User({ fullName, username, password: hashedPassword, phone, email });
+        const newUser = new User({ fullName, username, password: hashedPassword, phone, email: safeEmail });
         await newUser.save();
-        delete otpCache[email]; 
+        delete otpCache[safeEmail]; 
         res.json({ success: true, message: "Đăng ký thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
 
 app.post('/api/login', async (req, res) => {
     try {
-        const loginId = req.body.username; 
+        // CHỐNG NoSQL INJECTION: Tránh việc hacker nhét { "$ne": null } vào loginId
+        const loginId = String(req.body.username); 
+        
         let user = await User.findOne({ $or: [{ username: loginId }, { email: loginId }] });
         let isRole = 'user';
         if (!user) { user = await Admin.findOne({ username: loginId }); isRole = 'admin'; }
         if (!user) return res.status(401).json({ success: false, message: "Sai tài khoản hoặc Email!" });
         
-        // CHẶN NGAY TỪ CỬA NẾU BỊ KHÓA
         if (user.isLocked) return res.status(403).json({ success: false, message: "Tài khoản của bạn đã bị Admin khóa do vi phạm chính sách!" });
 
-        const isMatch = await bcrypt.compare(req.body.password, user.password);
+        const isMatch = await bcrypt.compare(String(req.body.password), user.password);
         if (!isMatch) return res.status(401).json({ success: false, message: "Sai mật khẩu!" });
 
         if (isRole === 'admin') {
@@ -214,7 +196,8 @@ app.post('/api/login', async (req, res) => {
             return res.json({ success: true, token, user: { username: user.username, fullName: user.fullName, role: isRole, avatar: user.avatar }, requireOtp: false });
         }
 
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        // SINH OTP BẢO MẬT
+        const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
         const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ OTP ĐĂNG NHẬP BẢO MẬT</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Đăng Nhập', message: htmlContent } };
@@ -225,32 +208,33 @@ app.post('/api/login', async (req, res) => {
 
 app.post('/api/login-verify', async (req, res) => {
     try {
-        const { email, otp } = req.body;
-        const cached = otpCache[email];
+        const safeEmail = String(req.body.email);
+        const safeOtp = String(req.body.otp);
+        const cached = otpCache[safeEmail];
+        
         if (!cached) return res.status(400).json({ success: false, message: "Phiên đăng nhập không hợp lệ!" });
         if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN!" });
-        if (cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
+        if (cached.code !== safeOtp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
         
-        const user = await User.findOne({ email: email });
-        
-        // GHI NHẬN LỊCH SỬ ĐĂNG NHẬP SAU KHI VƯỢT QUA OTP
+        const user = await User.findOne({ email: safeEmail });
         const now = new Date().toLocaleString('vi-VN', { hour12: false });
         user.loginHistory.push(now);
         await user.save();
 
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
         const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
-        delete otpCache[email]; 
+        delete otpCache[safeEmail]; 
         res.json({ success: true, token, user: userData });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
 
 app.post('/api/request-otp', async (req, res) => {
     try {
-        const { email } = req.body;
+        const email = String(req.body.email);
         const user = await User.findOne({ email: email });
         if (!user) return res.status(404).json({ success: false, message: "Email không tồn tại!" });
-        const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
+        
+        const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
         const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ XÁC NHẬN BẢO MẬT (OTP)</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Xác Nhận Bảo Mật', message: htmlContent } };
@@ -262,37 +246,38 @@ app.post('/api/request-otp', async (req, res) => {
 app.post('/api/forgot-password-verify', async (req, res) => {
     try {
         const { email, otp, newPassword } = req.body;
-        const cached = otpCache[email];
-        if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
-        const user = await User.findOne({ email: email });
+        const safeEmail = String(email);
+        const cached = otpCache[safeEmail];
+        if (!cached || Date.now() > cached.expiresAt || cached.code !== String(otp)) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
+        
+        const user = await User.findOne({ email: safeEmail });
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        delete otpCache[email]; 
+        delete otpCache[safeEmail]; 
         res.json({ success: true, message: "Khôi phục mật khẩu thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
 
-// API ĐỔI MẬT KHẨU TỪ TRONG TRANG PROFILE (TỰ ĐỘNG MÃ HÓA BCRYPT)
 app.post('/api/users/change-password', verifyToken, async (req, res) => {
     try {
         const { oldPassword, newPassword } = req.body;
         let user = await User.findById(req.user.id) || await Admin.findById(req.user.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng." });
         
-        // So khớp mật khẩu cũ
-        const isMatch = await bcrypt.compare(oldPassword, user.password);
+        const isMatch = await bcrypt.compare(String(oldPassword), user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Mật khẩu hiện tại không chính xác!" });
         
-        // Mã hóa mật khẩu mới siêu cấp bảo mật
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        
         res.json({ success: true, message: "Đổi mật khẩu thành công! Mật khẩu mới đã được mã hóa an toàn." });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
 
+// ==========================================
+// API SẢN PHẨM & TÌM KIẾM
+// ==========================================
 app.get('/api/products', async (req, res) => {
     try { 
         const products = await Product.find();
@@ -378,6 +363,9 @@ app.put('/api/products/:id/view', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
+// ==========================================
+// API ĐƠN HÀNG
+// ==========================================
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
@@ -438,7 +426,7 @@ app.post('/api/orders', async (req, res) => {
 app.get('/api/orders', async (req, res) => { try { res.json(await Order.find()); } catch (err) { res.status(500).json({ message: "Lỗi!" }); } });
 
 // ==========================================
-// API THỐNG KÊ DOANH THU (TUẦN/THÁNG/NĂM)
+// API THỐNG KÊ DOANH THU 
 // ==========================================
 app.get('/api/admin/revenue', async (req, res) => {
     try {
@@ -449,7 +437,6 @@ app.get('/api/admin/revenue', async (req, res) => {
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
         
-        // Xác định mốc thời gian: Đầu tuần (Thứ 2), Đầu tháng, Đầu năm
         const dayOfWeek = now.getDay() || 7; 
         const startOfWeek = new Date(today);
         startOfWeek.setDate(today.getDate() - dayOfWeek + 1);
@@ -461,7 +448,6 @@ app.get('/api/admin/revenue', async (req, res) => {
             totalRevenue += o.total || 0;
             totalOrders++;
             
-            // Bóc tách ngày tháng từ chuỗi (Ví dụ: "16:45:00 19/09/2026" -> 19, 09, 2026)
             let dateStr = o.date || "";
             let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
             if(dMatch) {
@@ -476,9 +462,6 @@ app.get('/api/admin/revenue', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Lỗi thống kê!" }); }
 });
 
-// ==========================================
-// API VẼ BIỂU ĐỒ DOANH THU (ĐA CHIỀU: NGÀY/TUẦN/THÁNG/NĂM)
-// ==========================================
 app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
     try {
@@ -486,7 +469,6 @@ app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
         
         let daily = {}, weekly = {}, monthly = {}, yearly = {};
 
-        // Hàm hỗ trợ tính số thứ tự của Tuần trong Năm
         function getWeekNumber(d) {
             d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
             d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
@@ -605,7 +587,7 @@ app.post('/api/coupons/apply', async (req, res) => {
 });
 
 // ==========================================
-// API QUẢN TRỊ KHÁCH HÀNG (THÊM TÍNH NĂNG KHÓA TÀI KHOẢN)
+// API QUẢN TRỊ KHÁCH HÀNG
 // ==========================================
 app.get('/api/admin/users', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
@@ -615,14 +597,13 @@ app.get('/api/admin/users', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
 });
 
-// API Toggle Khóa/Mở Khóa tài khoản
 app.put('/api/admin/users/:id/lock', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
     try {
         let user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy user!" });
         
-        user.isLocked = !user.isLocked; // Đảo ngược trạng thái khóa
+        user.isLocked = !user.isLocked; 
         await user.save();
         res.json({ success: true, message: user.isLocked ? "Đã khóa tài khoản thành công!" : "Đã mở khóa tài khoản!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi thực thi!" }); }
@@ -636,55 +617,33 @@ app.delete('/api/admin/users/:id', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi xóa tài khoản!" }); }
 });
 
-// API Đổi Mật Khẩu Khách Hàng Bởi Admin (Bypass mật khẩu cũ, tự động mã hóa bcrypt)
 app.put('/api/admin/users/:id/change-password', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
     
     try {
         const { newPassword } = req.body;
-        if (!newPassword || newPassword.length < 6) {
-            return res.status(400).json({ success: false, message: "Mật khẩu mới phải từ 6 ký tự trở lên!" });
-        }
-        
+        if (!newPassword || newPassword.length < 6) return res.status(400).json({ success: false, message: "Mật khẩu mới phải từ 6 ký tự trở lên!" });
         let user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy tài khoản khách hàng này!" });
-        
-        // Mã hóa mật khẩu mới bằng thuật toán bcrypt
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        
         res.json({ success: true, message: `Đã đổi mật khẩu cho khách hàng [${user.username}] thành công!` });
-    } catch (err) { 
-        res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" }); 
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" }); }
 });
 
-// ==========================================
-// API ĐỔI MẬT KHẨU ADMIN (CHỈ CẦN NHẬP MẬT KHẨU MỚI)
-// ==========================================
 app.post('/api/admin/change-password', verifyToken, async (req, res) => {
-    // 1. Chặn đứng nếu không phải Admin
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
-    
     try {
         const { newPassword } = req.body;
-        if (!newPassword || newPassword.length < 6) {
-            return res.status(400).json({ success: false, message: "Mật khẩu mới phải từ 6 ký tự trở lên!" });
-        }
-        
+        if (!newPassword || newPassword.length < 6) return res.status(400).json({ success: false, message: "Mật khẩu mới phải từ 6 ký tự trở lên!" });
         let admin = await Admin.findById(req.user.id);
         if (!admin) return res.status(404).json({ success: false, message: "Không tìm thấy tài khoản Admin!" });
-        
-        // 2. Mã hóa mật khẩu mới bằng bcrypt trước khi lưu
         const salt = await bcrypt.genSalt(10);
         admin.password = await bcrypt.hash(newPassword, salt);
         await admin.save();
-        
         res.json({ success: true, message: "Đã đổi mật khẩu Admin thành công!" });
-    } catch (err) { 
-        res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" }); 
-    }
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" }); }
 });
 
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date().toISOString() }); });
