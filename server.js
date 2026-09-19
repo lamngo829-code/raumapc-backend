@@ -343,13 +343,34 @@ app.get('/api/products', async (req, res) => {
         // 2. KHỞI TẠO BỘ LỌC (Query Object)
         let filter = {};
 
-        // Lọc theo từ khóa tìm kiếm (Text Search tương đối, không phân biệt hoa thường)
+        // LỌC TỪ KHÓA TÌM KIẾM (TÍCH HỢP BỘ LỌC SÁT THỦ)
         if (req.query.search) {
-            // Tìm trong tên sản phẩm HOẶC mã sản phẩm
-            filter.$or = [
-                { name: { $regex: req.query.search, $options: 'i' } },
-                { productId: { $regex: req.query.search, $options: 'i' } }
+            const keyword = req.query.search.trim();
+            const keywordLower = keyword.toLowerCase();
+            
+            // Điều kiện gốc: Tìm trong tên HOẶC mã sản phẩm
+            const searchCondition = [
+                { name: { $regex: keyword, $options: 'i' } },
+                { productId: { $regex: keyword, $options: 'i' } }
             ];
+
+            // Xử lý ngoại lệ thông minh trực tiếp trên Database
+            if (['cpu', 'intel', 'amd'].includes(keywordLower) && !keywordLower.includes('tản')) {
+                // Lấy CPU nhưng tuyệt đối KHÔNG chứa các chữ liên quan đến tản nhiệt
+                filter.$and = [
+                    { $or: searchCondition },
+                    { name: { $not: /tản nhiệt|cooler|fan|keo/i } }
+                ];
+            } else if (keywordLower === 'ram') {
+                // Lấy RAM nhưng không lấy Ngàm/Khung
+                filter.$and = [
+                    { $or: searchCondition },
+                    { name: { $not: /ngàm|khung/i } }
+                ];
+            } else {
+                // Các từ khóa bình thường thì tìm kiếm bình thường
+                filter.$or = searchCondition;
+            }
         }
 
         // Lọc theo danh mục (Hỗ trợ lọc nhiều danh mục cùng lúc, vd: ?category=cpu,vga)
