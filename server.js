@@ -409,26 +409,60 @@ app.post('/api/orders', async (req, res) => {
 
 app.get('/api/orders', async (req, res) => { try { res.json(await Order.find()); } catch (err) { res.status(500).json({ message: "Lỗi!" }); } });
 
+// ==========================================
+// API THỐNG KÊ DOANH THU (TUẦN/THÁNG/NĂM)
+// ==========================================
 app.get('/api/admin/revenue', async (req, res) => {
     try {
-        const revenue = await Order.aggregate([ { $match: { status: "Hoàn thành" } }, { $group: { _id: null, totalRevenue: {$sum: "$total" }, totalOrders: { $sum: 1 } } } ]);
-        res.json(revenue[0] || { totalRevenue: 0, totalOrders: 0 });
+        const orders = await Order.find({ status: "Hoàn thành" });
+        let totalRevenue = 0, totalOrders = 0;
+        let weekRev = 0, monthRev = 0, yearRev = 0;
+
+        const now = new Date();
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        
+        // Xác định mốc thời gian: Đầu tuần (Thứ 2), Đầu tháng, Đầu năm
+        const dayOfWeek = now.getDay() || 7; 
+        const startOfWeek = new Date(today);
+        startOfWeek.setDate(today.getDate() - dayOfWeek + 1);
+
+        const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const startOfYear = new Date(now.getFullYear(), 0, 1);
+
+        orders.forEach(o => {
+            totalRevenue += o.total || 0;
+            totalOrders++;
+            
+            // Bóc tách ngày tháng từ chuỗi (Ví dụ: "16:45:00 19/09/2026" -> 19, 09, 2026)
+            let dateStr = o.date || "";
+            let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            if(dMatch) {
+                let oDate = new Date(dMatch[3], dMatch[2]-1, dMatch[1]);
+                if(oDate >= startOfWeek) weekRev += o.total || 0;
+                if(oDate >= startOfMonth) monthRev += o.total || 0;
+                if(oDate >= startOfYear) yearRev += o.total || 0;
+            }
+        });
+
+        res.json({ totalRevenue, totalOrders, weekRev, monthRev, yearRev });
     } catch (err) { res.status(500).json({ message: "Lỗi thống kê!" }); }
 });
 
 // ==========================================
-// API VẼ BIỂU ĐỒ DOANH THU THEO NGÀY
+// API VẼ BIỂU ĐỒ DOANH THU THEO NGÀY (CẢI TIẾN)
 // ==========================================
 app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
     try {
-        // Chỉ lấy các đơn đã giao thành công
         const orders = await Order.find({ status: "Hoàn thành" });
         const chartData = {};
         
-        // Gom nhóm doanh thu theo từng ngày
         orders.forEach(order => {
-            let datePart = order.date ? order.date.split(' ')[0] : 'Chưa rõ';
+            let dateStr = order.date || "";
+            let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+            // Chuẩn hóa định dạng ngày để vẽ biểu đồ cho đẹp
+            let datePart = dMatch ? `${dMatch[1]}/${dMatch[2]}/${dMatch[3]}` : 'Chưa rõ';
+            
             if (!chartData[datePart]) chartData[datePart] = 0;
             chartData[datePart] += order.total;
         });
