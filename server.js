@@ -416,6 +416,27 @@ app.get('/api/admin/revenue', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Lỗi thống kê!" }); }
 });
 
+// ==========================================
+// API VẼ BIỂU ĐỒ DOANH THU THEO NGÀY
+// ==========================================
+app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
+    try {
+        // Chỉ lấy các đơn đã giao thành công
+        const orders = await Order.find({ status: "Hoàn thành" });
+        const chartData = {};
+        
+        // Gom nhóm doanh thu theo từng ngày
+        orders.forEach(order => {
+            let datePart = order.date ? order.date.split(' ')[0] : 'Chưa rõ';
+            if (!chartData[datePart]) chartData[datePart] = 0;
+            chartData[datePart] += order.total;
+        });
+        
+        res.json({ labels: Object.keys(chartData), data: Object.values(chartData) });
+    } catch (err) { res.status(500).json({ message: "Lỗi vẽ biểu đồ!" }); }
+});
+
 app.put('/api/users/cart', verifyToken, async (req, res) => {
     try { await User.findByIdAndUpdate(req.user.id, { cart: req.body.cart }); res.json({ success: true, message: "Đã đồng bộ giỏ hàng" }); } catch (err) { res.status(500).json({ success: false, message: "Lỗi đồng bộ" }); }
 });
