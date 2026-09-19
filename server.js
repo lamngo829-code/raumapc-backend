@@ -449,25 +449,49 @@ app.get('/api/admin/revenue', async (req, res) => {
 });
 
 // ==========================================
-// API VẼ BIỂU ĐỒ DOANH THU THEO NGÀY (CẢI TIẾN)
+// API VẼ BIỂU ĐỒ DOANH THU (ĐA CHIỀU: NGÀY/TUẦN/THÁNG/NĂM)
 // ==========================================
 app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
     try {
         const orders = await Order.find({ status: "Hoàn thành" });
-        const chartData = {};
         
+        let daily = {}, weekly = {}, monthly = {}, yearly = {};
+
+        // Hàm hỗ trợ tính số thứ tự của Tuần trong Năm
+        function getWeekNumber(d) {
+            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
+            var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+        }
+
         orders.forEach(order => {
             let dateStr = order.date || "";
             let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-            // Chuẩn hóa định dạng ngày để vẽ biểu đồ cho đẹp
-            let datePart = dMatch ? `${dMatch[1]}/${dMatch[2]}/${dMatch[3]}` : 'Chưa rõ';
-            
-            if (!chartData[datePart]) chartData[datePart] = 0;
-            chartData[datePart] += order.total;
+            if (dMatch) {
+                let d = parseInt(dMatch[1]), m = parseInt(dMatch[2]), y = parseInt(dMatch[3]);
+                let dateObj = new Date(y, m-1, d);
+                
+                let dayKey = `${d}/${m}/${y}`;
+                let weekKey = `Tuần ${getWeekNumber(dateObj)}, ${y}`;
+                let monthKey = `Tháng ${m}/${y}`;
+                let yearKey = `Năm ${y}`;
+
+                let val = order.total || 0;
+                daily[dayKey] = (daily[dayKey] || 0) + val;
+                weekly[weekKey] = (weekly[weekKey] || 0) + val;
+                monthly[monthKey] = (monthly[monthKey] || 0) + val;
+                yearly[yearKey] = (yearly[yearKey] || 0) + val;
+            }
         });
         
-        res.json({ labels: Object.keys(chartData), data: Object.values(chartData) });
+        res.json({
+            daily: { labels: Object.keys(daily), data: Object.values(daily) },
+            weekly: { labels: Object.keys(weekly), data: Object.values(weekly) },
+            monthly: { labels: Object.keys(monthly), data: Object.values(monthly) },
+            yearly: { labels: Object.keys(yearly), data: Object.values(yearly) }
+        });
     } catch (err) { res.status(500).json({ message: "Lỗi vẽ biểu đồ!" }); }
 });
 
