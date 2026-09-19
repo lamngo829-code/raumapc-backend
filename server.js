@@ -53,12 +53,12 @@ mongoose.connect(process.env.MONGO_URI)
     .catch(err => console.error('❌ Lỗi kết nối MongoDB:', err));
 
 // ==========================================
-// KHUÔN MẪU DỮ LIỆU (ĐÃ THÊM TỒN KHO)
+// KHUÔN MẪU DỮ LIỆU
 // ==========================================
 const productSchema = new mongoose.Schema({
     productId: String, name: String, price: String, img: String, warranty: String,
     status: { type: String, default: 'Còn hàng' }, 
-    stock: { type: Number, default: 10 }, // <-- TRƯỜNG LƯU TRỮ TỒN KHO (Mặc định 10)
+    stock: { type: Number, default: 10 }, 
     specs: String, description: String, category: String, brand: String,
     views: { type: Number, default: 0 }, comments: { type: Array, default: [] }, gallery: { type: Array, default: [] }
 });
@@ -93,9 +93,6 @@ const verifyToken = async (req, res, next) => {
 
 app.get('/api/auth/verify', verifyToken, (req, res) => { res.json({ success: true }); });
 
-// ==========================================
-// TẠO ADMIN & XÁC THỰC
-// ==========================================
 app.get('/api/setup-admin', async (req, res) => {
     try {
         const existingAdmin = await Admin.findOne({ username: 'admin' });
@@ -235,18 +232,13 @@ app.post('/api/change-password-verify', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
 
-// ==========================================
-// API SẢN PHẨM & TÌM KIẾM
-// ==========================================
 app.get('/api/products', async (req, res) => {
     try { 
         const products = await Product.find();
         const formattedProducts = products.map(sp => ({
             id: sp._id.toString(), productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), 
-            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty,
-            status: sp.status || 'Còn hàng', 
-            stock: sp.stock !== undefined ? sp.stock : 10, // <-- TRẢ VỀ SỐ LƯỢNG TỒN KHO
-            category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description,
+            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty, status: sp.status || 'Còn hàng', 
+            stock: sp.stock !== undefined ? sp.stock : 10, category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description,
             views: sp.views || 0, comments: sp.comments, gallery: sp.gallery || []
         }));
         res.json(formattedProducts); 
@@ -261,10 +253,8 @@ app.get('/api/products/detail/:id', async (req, res) => {
         if (!sp) return res.status(404).json({ message: "Không tìm thấy sản phẩm!" });
         res.json({
             id: sp._id.toString(), productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
-            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty, 
-            status: sp.status || 'Còn hàng',
-            stock: sp.stock !== undefined ? sp.stock : 10,
-            category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description, comments: sp.comments, gallery: sp.gallery || []
+            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty, status: sp.status || 'Còn hàng',
+            stock: sp.stock !== undefined ? sp.stock : 10, category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description, comments: sp.comments, gallery: sp.gallery || []
         });
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
 });
@@ -309,13 +299,7 @@ app.post('/api/products', async (req, res) => {
 app.put('/api/products/:id', async (req, res) => {
     try {
         if (!req.body.productId || req.body.productId.trim() === '') req.body.productId = await generateAutoId(req.body.category);
-        
-        // NẾU TỒN KHO BẰNG 0 -> ÉP CHUYỂN TRẠNG THÁI SANG HẾT HÀNG
-        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) {
-            req.body.stock = 0;
-            req.body.status = 'Hết hàng';
-        }
-
+        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) { req.body.stock = 0; req.body.status = 'Hết hàng'; }
         await Product.findByIdAndUpdate(req.params.id, req.body);
         res.json({ message: "Cập nhật thành công!" });
     } catch (err) { res.status(500).json({ message: "Lỗi cập nhật!" }); }
@@ -333,35 +317,25 @@ app.put('/api/products/:id/view', async (req, res) => {
     } catch (err) { res.status(500).json({ success: false }); }
 });
 
-// ==========================================
-// API ĐƠN HÀNG & TỰ ĐỘNG TRỪ TỒN KHO
-// ==========================================
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
         await newOrder.save();
 
-        // 1. TỰ ĐỘNG TRỪ TỒN KHO KHI ĐẶT HÀNG THÀNH CÔNG
         if (newOrder.items && newOrder.items.length > 0) {
             for (let item of newOrder.items) {
-                let qtyNum = parseInt(item.quantity) || 1;
-                let realId = item.id || item._id; 
+                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id; 
                 if (realId && mongoose.Types.ObjectId.isValid(realId)) {
                     let product = await Product.findById(realId);
                     if (product) {
                         product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
-                        // Nếu trừ xong mà kho rớt xuống <= 0, khóa chức năng mua bằng cách đổi Status
-                        if (product.stock <= 0) {
-                            product.stock = 0;
-                            product.status = 'Hết hàng';
-                        }
+                        if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
                         await product.save();
                     }
                 }
             }
         }
 
-        // 2. LOGIC GỬI EMAIL
         let cusName = newOrder.username; let cusPhone = "Đang cập nhật"; let cusAddress = "Đang cập nhật";
         const match = newOrder.username.match(/(.+?)\s*\((.+?)\s*-\s*(.+)\)/);
         if (match) { cusName = match[1]; cusPhone = match[2]; cusAddress = match[3]; }
@@ -471,9 +445,7 @@ app.post('/api/admin/coupons', verifyToken, async (req, res) => {
         req.body.code = req.body.code.toUpperCase();
         const existing = await Coupon.findOne({ code: req.body.code });
         if (existing) return res.status(400).json({ success: false, message: "Mã giảm giá này đã tồn tại!" });
-        
-        const newCoupon = new Coupon(req.body);
-        await newCoupon.save();
+        const newCoupon = new Coupon(req.body); await newCoupon.save();
         res.json({ success: true, message: "Thêm Voucher thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi lưu Voucher!" }); }
 });
@@ -490,6 +462,25 @@ app.post('/api/coupons/apply', async (req, res) => {
         if (!coupon) return res.status(404).json({ success: false, message: "Mã giảm giá không hợp lệ hoặc đã bị khóa!" });
         res.json({ success: true, discountPercent: coupon.discountPercent, message: `Áp dụng thành công! Đơn hàng được giảm ${coupon.discountPercent}%` });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
+});
+
+// ==========================================
+// MỚI: API QUẢN TRỊ KHÁCH HÀNG
+// ==========================================
+app.get('/api/admin/users', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try { 
+        const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
+        res.json(users); 
+    } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
+});
+
+app.delete('/api/admin/users/:id', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try { 
+        await User.findByIdAndDelete(req.params.id); 
+        res.json({ success: true, message: "Đã khóa/xóa tài khoản khách hàng!" }); 
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi xóa tài khoản!" }); }
 });
 
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date().toISOString() }); });
