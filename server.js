@@ -143,18 +143,35 @@ app.post('/api/admin/create', verifyToken, async (req, res) => {
 const otpCache = {};
 app.post('/api/request-register-otp', async (req, res) => {
     try {
-        // CHỐNG NoSQL INJECTION: Ép kiểu dữ liệu về String
         const email = String(req.body.email);
         const username = String(req.body.username);
         
         const existingUser = await User.findOne({ $or: [{ email: email }, { username: username }] });
         if (existingUser) return res.status(400).json({ success: false, message: "Email hoặc Tên đăng nhập đã được sử dụng!" });
         
-        // SINH OTP BẢO MẬT: Dùng crypto thay cho Math.random()
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
         
-        const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ OTP XÁC NHẬN ĐĂNG KÝ</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
+        const htmlContent = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
+                <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.2); display: inline-block;">
+                <h2 style="color: white; margin: 10px 0 0; font-size: 24px; letter-spacing: 1px;">RAU MÁ PC</h2>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+                <h3 style="color: #1e293b; font-size: 18px; margin-top: 0; text-align: center;">MÃ OTP ĐĂNG KÝ TÀI KHOẢN</h3>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Xin chào bạn,</p>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Bạn vừa yêu cầu mã xác nhận để đăng ký tài khoản. Dưới đây là mã OTP của bạn:</p>
+                <div style="background: #f8fafc; border: 2px dashed #1435c3; border-radius: 8px; padding: 20px; text-align: center; margin: 25px 0;">
+                    <h1 style="margin: 0; color: #d70018; font-size: 38px; letter-spacing: 8px;">${otpCode}</h1>
+                </div>
+                <p style="color: #dc2626; font-size: 14px; text-align: center; font-weight: bold; margin-bottom: 5px;">⚠️ Mã này chỉ có hiệu lực trong đúng 60 giây.</p>
+                <p style="color: #64748b; font-size: 13px; text-align: center; margin-top: 0;">Tuyệt đối không chia sẻ mã này cho bất kỳ ai để bảo vệ an toàn.</p>
+            </div>
+            <div style="background: #f1f5f9; padding: 20px; text-align: center; border-top: 1px solid #eaebec;">
+                <p style="margin: 0; color: #94a3b8; font-size: 12px;">© 2026 Rau Má PC. All rights reserved.</p>
+            </div>
+        </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: email, subject: '[Rau Má PC] Mã OTP Đăng Ký Tài Khoản', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
         res.json({ success: true, message: "Mã OTP đăng ký đã được gửi đến Email!" });
@@ -178,7 +195,6 @@ app.post('/api/register', async (req, res) => {
 
 app.post('/api/login', async (req, res) => {
     try {
-        // CHỐNG NoSQL INJECTION: Tránh việc hacker nhét { "$ne": null } vào loginId
         const loginId = String(req.body.username); 
         
         let user = await User.findOne({ $or: [{ username: loginId }, { email: loginId }] });
@@ -196,10 +212,29 @@ app.post('/api/login', async (req, res) => {
             return res.json({ success: true, token, user: { username: user.username, fullName: user.fullName, role: isRole, avatar: user.avatar }, requireOtp: false });
         }
 
-        // SINH OTP BẢO MẬT
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-        const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ OTP ĐĂNG NHẬP BẢO MẬT</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
+        
+        const htmlContent = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
+                <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.2); display: inline-block;">
+                <h2 style="color: white; margin: 10px 0 0; font-size: 24px; letter-spacing: 1px;">RAU MÁ PC</h2>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+                <h3 style="color: #1e293b; font-size: 18px; margin-top: 0; text-align: center;">MÃ OTP ĐĂNG NHẬP BẢO MẬT</h3>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Chào <strong>${user.fullName}</strong>,</p>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Hệ thống vừa ghi nhận một yêu cầu đăng nhập vào tài khoản của bạn. Dưới đây là mã OTP:</p>
+                <div style="background: #f8fafc; border: 2px dashed #1435c3; border-radius: 8px; padding: 20px; text-align: center; margin: 25px 0;">
+                    <h1 style="margin: 0; color: #d70018; font-size: 38px; letter-spacing: 8px;">${otpCode}</h1>
+                </div>
+                <p style="color: #dc2626; font-size: 14px; text-align: center; font-weight: bold; margin-bottom: 5px;">⚠️ Mã này chỉ có hiệu lực trong đúng 60 giây.</p>
+                <p style="color: #64748b; font-size: 13px; text-align: center; margin-top: 0;">Tuyệt đối không chia sẻ mã này cho bất kỳ ai để bảo vệ an toàn.</p>
+            </div>
+            <div style="background: #f1f5f9; padding: 20px; text-align: center; border-top: 1px solid #eaebec;">
+                <p style="margin: 0; color: #94a3b8; font-size: 12px;">© 2026 Rau Má PC. All rights reserved.</p>
+            </div>
+        </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Đăng Nhập', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
         res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
@@ -236,7 +271,27 @@ app.post('/api/request-otp', async (req, res) => {
         
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-        const htmlContent = `<div style="font-family: Arial; padding: 20px;"><h2 style="color: #1435c3;">MÃ XÁC NHẬN BẢO MẬT (OTP)</h2><p>Mã của bạn là: <b style="color: #d70018;">${otpCode}</b></p></div>`;
+        
+        const htmlContent = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
+            <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
+                <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo" style="width: 60px; height: 60px; border-radius: 50%; box-shadow: 0 2px 5px rgba(0,0,0,0.2); display: inline-block;">
+                <h2 style="color: white; margin: 10px 0 0; font-size: 24px; letter-spacing: 1px;">RAU MÁ PC</h2>
+            </div>
+            <div style="padding: 30px; background: #ffffff;">
+                <h3 style="color: #1e293b; font-size: 18px; margin-top: 0; text-align: center;">MÃ XÁC NHẬN BẢO MẬT (OTP)</h3>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Chào <strong>${user.fullName}</strong>,</p>
+                <p style="color: #475569; font-size: 15px; line-height: 1.6; text-align: center;">Hệ thống nhận được yêu cầu thay đổi bảo mật cho tài khoản của bạn. Dưới đây là mã xác nhận:</p>
+                <div style="background: #f8fafc; border: 2px dashed #1435c3; border-radius: 8px; padding: 20px; text-align: center; margin: 25px 0;">
+                    <h1 style="margin: 0; color: #d70018; font-size: 38px; letter-spacing: 8px;">${otpCode}</h1>
+                </div>
+                <p style="color: #dc2626; font-size: 14px; text-align: center; font-weight: bold; margin-bottom: 5px;">⚠️ Mã này chỉ có hiệu lực trong đúng 60 giây.</p>
+                <p style="color: #64748b; font-size: 13px; text-align: center; margin-top: 0;">Nếu bạn không yêu cầu mã này, vui lòng đổi mật khẩu ngay lập tức.</p>
+            </div>
+            <div style="background: #f1f5f9; padding: 20px; text-align: center; border-top: 1px solid #eaebec;">
+                <p style="margin: 0; color: #94a3b8; font-size: 12px;">© 2026 Rau Má PC. All rights reserved.</p>
+            </div>
+        </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Xác Nhận Bảo Mật', message: htmlContent } };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
         res.json({ success: true, message: "Mã OTP đã gửi qua Email!" });
