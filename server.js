@@ -331,19 +331,96 @@ app.post('/api/users/change-password', verifyToken, async (req, res) => {
 });
 
 // ==========================================
-// API SẢN PHẨM & TÌM KIẾM
+// API LẤY DANH SÁCH SẢN PHẨM (CÓ BỘ LỌC NÂNG CAO & PHÂN TRANG)
 // ==========================================
 app.get('/api/products', async (req, res) => {
-    try { 
-        const products = await Product.find();
+    try {
+        // 1. NHẬN CÁC THAM SỐ TỪ URL (Query Parameters)
+        const page = parseInt(req.query.page) || 1;       // Trang hiện tại (Mặc định: 1)
+        const limit = parseInt(req.query.limit) || 12;    // Số SP trên mỗi trang (Mặc định: 12)
+        const skip = (page - 1) * limit;                  // Tính số lượng SP cần bỏ qua
+
+        // 2. KHỞI TẠO BỘ LỌC (Query Object)
+        let filter = {};
+
+        // Lọc theo từ khóa tìm kiếm (Text Search tương đối, không phân biệt hoa thường)
+        if (req.query.search) {
+            // Tìm trong tên sản phẩm HOẶC mã sản phẩm
+            filter.$or = [
+                { name: { $regex: req.query.search, $options: 'i' } },
+                { productId: { $regex: req.query.search, $options: 'i' } }
+            ];
+        }
+
+        // Lọc theo danh mục (Hỗ trợ lọc nhiều danh mục cùng lúc, vd: ?category=cpu,vga)
+        if (req.query.category) {
+            const categories = req.query.category.split(',').map(c => new RegExp(c.trim(), 'i'));
+            filter.category = { $in: categories };
+        }
+
+        // Lọc theo hãng sản xuất (Brand)
+        if (req.query.brand) {
+            filter.brand = new RegExp(`^${req.query.brand.trim()}$`, 'i');
+        }
+
+        // Lọc theo trạng thái (VD: Chỉ hiện hàng "Còn hàng")
+        if (req.query.status) {
+            filter.status = req.query.status;
+        }
+
+        // 3. KHỞI TẠO TÙY CHỌN SẮP XẾP (Sort)
+        let sortOption = {};
+        if (req.query.sort) {
+            if (req.query.sort === 'newest') sortOption._id = -1;       // Mới nhất
+            else if (req.query.sort === 'views') sortOption.views = -1; // Xem nhiều nhất
+        } else {
+            sortOption._id = -1; // Mặc định luôn xếp mới nhất lên đầu
+        }
+
+        // 4. THỰC THI TRUY VẤN VÀO MONGODB
+        // Đếm tổng số sản phẩm thỏa mãn bộ lọc (để Frontend làm nút phân trang 1 2 3...)
+        const totalProducts = await Product.countDocuments(filter);
+        
+        // Lấy đúng số lượng sản phẩm của trang hiện tại
+        const products = await Product.find(filter)
+                                      .sort(sortOption)
+                                      .skip(skip)
+                                      .limit(limit);
+
+        // 5. FORMAT LẠI DỮ LIỆU ĐỂ TRẢ VỀ FRONTEND (Giữ nguyên cấu trúc cũ của bạn)
         const formattedProducts = products.map(sp => ({
-            id: sp._id.toString(), productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), 
-            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty, status: sp.status || 'Còn hàng', 
-            stock: sp.stock !== undefined ? sp.stock : 10, category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description,
-            views: sp.views || 0, comments: sp.comments, gallery: sp.gallery || []
+            id: sp._id.toString(), 
+            productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), 
+            name: sp.name, 
+            price: sp.price, 
+            img: sp.img, 
+            warranty: sp.warranty, 
+            status: sp.status || 'Còn hàng', 
+            stock: sp.stock !== undefined ? sp.stock : 10, 
+            category: sp.category, 
+            brand: sp.brand, 
+            specs: sp.specs, 
+            description: sp.description,
+            views: sp.views || 0, 
+            comments: sp.comments, 
+            gallery: sp.gallery || []
         }));
-        res.json(formattedProducts); 
-    } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
+
+        // 6. TRẢ KẾT QUẢ VỀ KÈM THÔNG TIN PHÂN TRANG
+        res.json({
+            success: true,
+            data: formattedProducts,
+            pagination: {
+                totalItems: totalProducts,
+                currentPage: page,
+                limit: limit,
+                totalPages: Math.ceil(totalProducts / limit) // Tổng số trang
+            }
+        });
+
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Lỗi Server khi lọc sản phẩm!" }); 
+    }
 });
 
 app.get('/api/products/detail/:id', async (req, res) => {
