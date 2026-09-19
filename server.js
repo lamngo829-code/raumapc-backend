@@ -21,8 +21,36 @@ app.use(cors({
     credentials: true
 }));
 
-app.use(express.json({ limit: '5mb' }));
-app.use(express.urlencoded({ limit: '5mb', extended: true }));
+const express = require('express');
+const multer = require('multer');
+const app = express();
+
+const upload = multer({
+  dest: 'uploads/', // Thư mục lưu file tạm
+  limits: {
+    fileSize: 5 * 1024 * 1024, // Giới hạn 5MB cho MỖI BỨC ẢNH
+    files: 20 // Cho phép lưu tối đa 20 ảnh cùng lúc mỗi request
+  },
+  fileFilter: (req, file, cb) => {
+    // Bảo mật: Chỉ cho phép định dạng ảnh, chặn các file thực thi (.exe, .sh,...)
+    if (file.mimetype.startsWith('image/')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Định dạng file không hợp lệ, chỉ cho phép ảnh!'), false);
+    }
+  }
+});
+
+// Route xử lý việc upload hàng chục bức ảnh
+app.post('/upload-images', upload.array('photos', 20), (req, res) => {
+  res.status(200).json({ 
+    message: 'Upload thành công!', 
+    files: req.files.length 
+  });
+});
+
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 const rateLimit = require('express-rate-limit');
 const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" } });
