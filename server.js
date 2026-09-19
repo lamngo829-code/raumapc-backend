@@ -393,27 +393,85 @@ app.post('/api/orders', async (req, res) => {
         newOrder.items.forEach(item => {
             let priceNum = parseInt(String(item.price).replace(/\D/g, '')) || 0;
             let qtyNum = parseInt(item.quantity) || 1; let itemTotal = priceNum * qtyNum;
-            itemsHtml += `<tr><td style="padding: 12px 10px 12px 0; border-bottom: 1px solid #eee;">${item.name}</td><td style="padding: 12px 10px; border-bottom: 1px solid #eee; text-align: center;">${qtyNum}</td><td style="padding: 12px 0 12px 10px; border-bottom: 1px solid #eee; text-align: right; color: #d70018; font-weight: bold;">${new Intl.NumberFormat('vi-VN').format(itemTotal)}đ</td></tr>`;
+            itemsHtml += `
+            <tr>
+                <td style="padding: 12px 10px 12px 0; border-bottom: 1px solid #eee; color: #555; font-size: 14px;">${item.name}</td>
+                <td style="padding: 12px 10px; border-bottom: 1px solid #eee; text-align: center; color: #555; font-size: 14px;">${qtyNum}</td>
+                <td style="padding: 12px 0 12px 10px; border-bottom: 1px solid #eee; text-align: right; color: #d70018; font-weight: bold; font-size: 14px;">${new Intl.NumberFormat('vi-VN').format(itemTotal)}đ</td>
+            </tr>`;
         });
         let formattedTotal = new Intl.NumberFormat('vi-VN').format(newOrder.total) + ' đ';
 
+        const headerSubtitle = "Đơn hàng đang chờ duyệt";
+        const statusTitle = "ĐƠN HÀNG ĐANG CHỜ DUYỆT";
+        const statusMessage = "Cảm ơn bạn đã tin tưởng và mua sắm tại hệ thống Rau Má PC. Đơn hàng của bạn đã được hệ thống ghi nhận và đang chờ duyệt!";
+        const color = "#2980b9"; 
+        const bgColor = "#ebf5fb"; 
+
         const fullHtmlContent = `
-        <div style="font-family: Arial; max-width: 600px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px;">
-            <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 30px; text-align: center; color: white;">
-                <h1 style="margin: 0;">RAU MÁ PC</h1><p>Đơn hàng của bạn đã được ghi nhận</p>
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.04);">
+            <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 30px 20px; text-align: center;">
+                <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+                    <tr>
+                        <td style="padding-right: 18px; vertical-align: middle;">
+                            <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo Rau Má" style="width: 75px; height: auto; display: block; border-radius: 4px;">
+                        </td>
+                        <td style="vertical-align: middle; text-align: left;">
+                            <h1 style="margin: 0; font-size: 28px; font-weight: bold; letter-spacing: 1.5px; color: #ffffff;">RAU MÁ PC</h1>
+                            <p style="margin: 5px 0 0; font-size: 15px; color: #cbd5e1;">${headerSubtitle}</p>
+                        </td>
+                    </tr>
+                </table>
             </div>
-            <div style="padding: 30px;">
-                <p>Chào <strong>${cusName}</strong>, cảm ơn bạn đã đặt hàng.</p>
-                <h3 style="color: #1435c3; border-bottom: 2px solid #f4f7fe; padding-bottom: 8px;">Mã đơn: #${newOrder.orderId}</h3>
-                <p><b>Hình thức:</b> ${newOrder.paymentMethod || 'Thanh toán COD'}</p>
-                <p><b>Điện thoại:</b> ${cusPhone}</p><p><b>Địa chỉ:</b> ${cusAddress}</p>
-                <table style="width: 100%; border-collapse: collapse;"><tbody>${itemsHtml}</tbody></table>
-                <h2 style="text-align: right; color: #d70018;">Tổng: ${formattedTotal}</h2>
+            <div style="padding: 40px 30px; background-color: #ffffff; color: #333333;">
+                <p style="font-size: 15px; margin-top: 0; margin-bottom: 20px;">Chào <strong>${cusName}</strong>,</p>
+                <div style="background-color: ${bgColor}; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; border: 1px solid ${color}40;">
+                    <h3 style="color: ${color}; margin: 0 0 10px 0; font-size: 16px; font-weight: bold; text-transform: uppercase;">${statusTitle}</h3>
+                    <p style="color: #444; margin: 0; line-height: 1.6; font-size: 14px;">${statusMessage}</p>
+                </div>
+                <h3 style="color: #1435c3; border-bottom: 2px solid #f4f7fe; padding-bottom: 8px; margin-top: 30px; font-size: 15px;">Thông Tin Nhận Hàng (Mã đơn: #${newOrder.orderId})</h3>
+                <table style="width: 100%; font-size: 14px; line-height: 1.8; color: #444;">
+                    <tr><td style="width: 110px; font-weight: bold;">Người nhận:</td><td>${cusName}</td></tr>
+                    <tr><td style="font-weight: bold;">Số điện thoại:</td><td>${cusPhone}</td></tr>
+                    <tr><td style="font-weight: bold;">Địa chỉ:</td><td>${cusAddress}</td></tr>
+                </table>
+                <h3 style="color: #1435c3; border-bottom: 2px solid #f4f7fe; padding-bottom: 8px; margin-top: 30px; font-size: 15px;">Chi Tiết Sản Phẩm</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <thead>
+                        <tr style="background-color: #f4f7fe; color: #2b3674;">
+                            <th style="padding: 10px; text-align: left; border-radius: 6px 0 0 6px;">Tên sản phẩm</th>
+                            <th style="padding: 10px; text-align: center;">SL</th>
+                            <th style="padding: 10px; text-align: right; border-radius: 0 6px 6px 0;">Thành tiền</th>
+                        </tr>
+                    </thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div style="text-align: right; margin-top: 25px; padding-top: 15px; border-top: 2px dashed #eee;">
+                    <span style="font-size: 14px; color: #555;">Tổng thanh toán:</span>
+                    <strong style="color: #d70018; font-size: 24px; margin-left: 10px;">${formattedTotal}</strong>
+                </div>
+            </div>
+            <div style="background-color: #f8f9fa; padding: 25px 20px; text-align: center; font-size: 13px; color: #777777; border-top: 1px solid #eeeeee;">
+                <p style="margin: 0 0 8px 0; font-weight: bold; color: #333333; font-size: 14px;">CÔNG TY TNHH MÁY TÍNH RAU MÁ</p>
+                <p style="margin: 4px 0;">Hotline: <strong style="color: #1435c3;">1900 3636</strong> | Email: cskh@raumapc.com</p>
+                <p style="margin: 4px 0 0;">Địa chỉ: An Phú Đông, Quận 12, TP. Hồ Chí Minh</p>
             </div>
         </div>`;
 
-        const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: newOrder.email, subject: `[Rau Má PC] Đơn hàng #${newOrder.orderId} chờ xác nhận`, message: fullHtmlContent } };
-        const adminEmailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: "lamngo829@gmail.com", subject: `🚨 CÓ ĐƠN MỚI #${newOrder.orderId}`, message: fullHtmlContent } };
+        const emailData = {
+            service_id: process.env.EMAILJS_SERVICE_ID,
+            template_id: process.env.EMAILJS_TEMPLATE_ID,
+            user_id: process.env.EMAILJS_USER_ID,
+            accessToken: process.env.EMAILJS_TOKEN,
+            template_params: { to_email: newOrder.email, subject: `[Rau Má PC] Đơn hàng #${newOrder.orderId} đang chờ xác nhận`, message: fullHtmlContent }
+        };
+        const adminEmailData = {
+            service_id: process.env.EMAILJS_SERVICE_ID,
+            template_id: process.env.EMAILJS_TEMPLATE_ID,
+            user_id: process.env.EMAILJS_USER_ID,
+            accessToken: process.env.EMAILJS_TOKEN,
+            template_params: { to_email: "lamngo829@gmail.com", subject: `🚨 CÓ ĐƠN MỚI #${newOrder.orderId}`, message: fullHtmlContent }
+        };
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(adminEmailData) }).catch(e=>console.log(e));
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
 
@@ -510,7 +568,125 @@ app.put('/api/users/cart', verifyToken, async (req, res) => {
 });
 
 app.put('/api/orders/:id/status', async (req, res) => {
-    try { await Order.findOneAndUpdate({ orderId: req.params.id }, { status: req.body.status }); res.json({ message: "Cập nhật thành công!" }); } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
+    try {
+        const order = await Order.findOneAndUpdate(
+            { orderId: req.params.id }, 
+            { status: req.body.status }, 
+            { returnDocument: 'after' }
+        );
+        
+        let statusTitle = ""; let statusMessage = ""; let color = ""; let bgColor = ""; let emailSubject = ""; let headerSubtitle = "";
+        
+        if (order.status === "Đang giao hàng") {
+            emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đang được giao đến bạn`;
+            headerSubtitle = "Đơn hàng đang được giao";
+            statusTitle = "ĐƠN HÀNG ĐANG ĐƯỢC GIAO";
+            statusMessage = "Tuyệt vời! Đơn hàng của bạn đã được bàn giao cho đơn vị vận chuyển và đang trên đường đến với bạn. Vui lòng chú ý điện thoại để nhận hàng nhé!";
+            color = "#f39c12"; bgColor = "#fdf8e4"; 
+        } else if (order.status === "Hoàn thành") {
+            emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đã giao thành công`;
+            headerSubtitle = "Giao hàng thành công";
+            statusTitle = "GIAO HÀNG THÀNH CÔNG";
+            statusMessage = "Đơn hàng của bạn đã được giao thành công. Rau Má PC rất cảm ơn bạn đã tin tưởng và ủng hộ. Chúc bạn có những trải nghiệm tuyệt vời cùng dàn máy của mình!";
+            color = "#27ae60"; bgColor = "#eafaf1"; 
+        } else if (order.status === "Đã hủy") {
+            emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đã bị hủy`;
+            headerSubtitle = "Đơn hàng đã hủy";
+            statusTitle = "ĐƠN HÀNG ĐÃ HỦY";
+            statusMessage = "Đơn hàng của bạn đã bị hủy trên hệ thống. Nếu có bất kỳ thắc mắc nào hoặc muốn đặt lại hàng, hãy liên hệ ngay với Rau Má PC nhé!";
+            color = "#e74c3c"; bgColor = "#fdedec"; 
+        } else {
+            emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đang chờ xác nhận`;
+            headerSubtitle = "Đơn hàng đang chờ duyệt";
+            statusTitle = "ĐƠN HÀNG ĐANG CHỜ DUYỆT";
+            statusMessage = "Cảm ơn bạn đã tin tưởng và mua sắm tại hệ thống Rau Má PC. Đơn hàng của bạn đã được hệ thống ghi nhận và đang chờ duyệt!";
+            color = "#2980b9"; bgColor = "#ebf5fb"; 
+        }
+
+        let cusName = order.username;
+        let cusPhone = "Đang cập nhật";
+        let cusAddress = "Đang cập nhật";
+        const match = order.username.match(/(.+?)\s*\((.+?)\s*-\s*(.+)\)/);
+        if (match) { cusName = match[1]; cusPhone = match[2]; cusAddress = match[3]; }
+
+        let itemsHtml = "";
+        if (order.items && order.items.length > 0) {
+            order.items.forEach(item => {
+                let priceNum = parseInt(String(item.price).replace(/\D/g, '')) || 0;
+                let qtyNum = parseInt(item.quantity) || 1;
+                itemsHtml += `
+                <tr>
+                    <td style="padding: 12px 10px 12px 0; border-bottom: 1px solid #eee; color: #555; font-size: 14px;">${item.name}</td>
+                    <td style="padding: 12px 10px; border-bottom: 1px solid #eee; text-align: center; color: #555; font-size: 14px;">${qtyNum}</td>
+                    <td style="padding: 12px 0 12px 10px; border-bottom: 1px solid #eee; text-align: right; color: #d70018; font-weight: bold; font-size: 14px;">${new Intl.NumberFormat('vi-VN').format(priceNum * qtyNum)}đ</td>
+                </tr>`;
+            });
+        }
+
+        const htmlContent = `
+        <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #e0e0e0; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05); border-radius: 8px;">
+            <div style="background-color: #1435c3; padding: 25px 20px; text-align: center;">
+                <table align="center" border="0" cellpadding="0" cellspacing="0" style="margin: 0 auto;">
+                    <tr>
+                        <td style="padding-right: 15px; vertical-align: middle;">
+                            <img src="https://github.com/lamngo829-code/raumapc-frontend/blob/main/assets/images/icons/logo-sticky.jpg?raw=true" alt="Logo" style="width: 65px; height: 65px; object-fit: cover; border-radius: 50%; box-shadow: 0 2px 10px rgba(0,0,0,0.2); display: block;">
+                        </td>
+                        <td style="vertical-align: middle; text-align: left;">
+                            <h1 style="margin: 0; font-size: 28px; letter-spacing: 1px; color: #ffffff;">RAU MÁ PC</h1>
+                            <p style="margin: 5px 0 0; font-size: 15px; opacity: 0.9; color: #ffffff;">${headerSubtitle}</p>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+            <div style="padding: 30px 20px; background-color: #ffffff; color: #333333;">
+                <p style="font-size: 15px; margin-top: 0; margin-bottom: 20px;">Chào <strong>${cusName}</strong>,</p>
+                <div style="background-color: ${bgColor}; padding: 20px; border-radius: 8px; text-align: center; margin: 20px 0; border: 1px solid ${color}40;">
+                    <h3 style="color: ${color}; margin: 0 0 10px 0; font-size: 16px; font-weight: bold; text-transform: uppercase;">${statusTitle}</h3>
+                    <p style="color: #444; margin: 0; line-height: 1.6; font-size: 14px;">${statusMessage}</p>
+                </div>
+                <h3 style="color: #1435c3; border-bottom: 2px solid #f4f7fe; padding-bottom: 8px; margin-top: 30px; font-size: 15px;">Thông Tin Nhận Hàng (Mã đơn: #${order.orderId})</h3>
+                <table style="width: 100%; font-size: 14px; line-height: 1.8; color: #444;">
+                    <tr><td style="width: 110px; font-weight: bold;">Người nhận:</td><td>${cusName}</td></tr>
+                    <tr><td style="font-weight: bold;">Số điện thoại:</td><td>${cusPhone}</td></tr>
+                    <tr><td style="font-weight: bold;">Địa chỉ:</td><td>${cusAddress}</td></tr>
+                </table>
+                <h3 style="color: #1435c3; border-bottom: 2px solid #f4f7fe; padding-bottom: 8px; margin-top: 30px; font-size: 15px;">Chi Tiết Sản Phẩm</h3>
+                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                    <thead><tr style="background-color: #f4f7fe; color: #2b3674;"><th style="padding: 10px; text-align: left; border-radius: 6px 0 0 6px;">Tên sản phẩm</th><th style="padding: 10px; text-align: center;">SL</th><th style="padding: 10px; text-align: right; border-radius: 0 6px 6px 0;">Thành tiền</th></tr></thead>
+                    <tbody>${itemsHtml}</tbody>
+                </table>
+                <div style="text-align: right; margin-top: 25px; padding-top: 15px; border-top: 2px dashed #eee;">
+                    <span style="font-size: 14px; color: #555;">Tổng thanh toán:</span>
+                    <strong style="color: #d70018; font-size: 22px; margin-left: 10px;">${new Intl.NumberFormat('vi-VN').format(order.total)} đ</strong>
+                </div>
+            </div>
+            <div style="background-color: #f9f9f9; padding: 20px; text-align: center; font-size: 12px; color: #777777; border-top: 1px solid #eeeeee;">
+                <p style="margin: 0; font-weight: bold; color: #333; font-size: 13px;">CÔNG TY TNHH MÁY TÍNH RAU MÁ</p>
+                <p style="margin: 6px 0 0;">Hotline: 1900 3636 | Email: <a href="mailto:cskh@raumapc.com" style="color: #1435c3; text-decoration: none;">cskh@raumapc.com</a></p>
+                <p style="margin: 6px 0 0;">Địa chỉ: An Phú Đông, Quận 12, TP. Hồ Chí Minh</p>
+            </div>
+        </div>`;
+
+        const emailData = {
+            service_id: process.env.EMAILJS_SERVICE_ID,
+            template_id: process.env.EMAILJS_TEMPLATE_ID, 
+            user_id: process.env.EMAILJS_USER_ID,
+            accessToken: process.env.EMAILJS_TOKEN, 
+            template_params: {
+                to_email: order.email,
+                subject: emailSubject, 
+                message: htmlContent
+            }
+        };
+
+        fetch('https://api.emailjs.com/api/v1.0/email/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(emailData)
+        }).catch(err => console.log(err));
+
+        res.json({ message: "Cập nhật và gửi thông báo cho khách thành công!" });
+    } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
 });
 
 app.delete('/api/orders/:id', async (req, res) => {
