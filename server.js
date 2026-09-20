@@ -39,6 +39,26 @@ async function uploadBase64ToCloud(base64String, folderName) {
     }
 }
 
+// Hàm hỗ trợ "Tiêu hủy" ảnh cũ trên Cloudinary
+async function deleteCloudinaryImage(imageUrl) {
+    if (!imageUrl || !imageUrl.includes('res.cloudinary.com')) return;
+    try {
+        // Tách lấy public_id từ đường link URL
+        const parts = imageUrl.split('/upload/');
+        if (parts.length === 2) {
+            const pathWithoutVersion = parts[1].replace(/^v\d+\//, ''); // Bỏ mã phiên bản (vd: v1234567/)
+            const publicId = pathWithoutVersion.substring(0, pathWithoutVersion.lastIndexOf('.')); // Bỏ đuôi file (.jpg, .png)
+            
+            if (publicId) {
+                await cloudinary.uploader.destroy(publicId);
+                console.log("🗑 Đã xóa ảnh cũ trên mây:", publicId);
+            }
+        }
+    } catch (error) {
+        console.error("Lỗi xóa ảnh Cloudinary:", error);
+    }
+}
+
 const app = express();
 app.set('trust proxy', 1);
 
@@ -525,17 +545,39 @@ app.post('/api/products', async (req, res) => {
     }
 });
 
-// CẬP NHẬT SẢN PHẨM (SỬA)
+// CẬP NHẬT SẢN PHẨM (SỬA & DỌN ẢNH CŨ)
 app.put('/api/products/:id', async (req, res) => {
     try {
-        // Tương tự, chặn luồng ảnh mới khi admin ấn sửa
-        if (req.body.img) {
+        const existingProduct = await Product.findById(req.params.id);
+        if (!existingProduct) return res.status(404).json({ message: "Không tìm thấy sản phẩm!" });
+
+        // 1. Nếu có thay đổi ảnh Chính
+        if (req.body.img && req.body.img.startsWith('data:image')) {
+            await deleteCloudinaryImage(existingProduct.img); // Xóa ảnh chính cũ
             req.body.img = await uploadBase64ToCloud(req.body.img, 'raumapc/products');
+        } else {
+            req.body.img = existingProduct.img; // Nếu không đổi thì giữ nguyên
         }
 
+        // 2. Xử lý và Dọn dẹp ảnh Phụ (Gallery)
         if (req.body.gallery && Array.isArray(req.body.gallery)) {
+            // Lọc ra các link ảnh cũ mà admin quyết định giữ lại
+            const retainedUrls = req.body.gallery.filter(item => item.startsWith('http'));
+            
+            // Tìm các link ảnh đã bị admin bấm nút Xóa (có trong DB cũ nhưng không có trong danh sách giữ lại)
+            const deletedUrls = (existingProduct.gallery || []).filter(oldUrl => !retainedUrls.includes(oldUrl));
+            
+            // Đem những ảnh bị loại bỏ đi tiêu hủy trên Cloudinary
+            for (let oldUrl of deletedUrls) {
+                await deleteCloudinaryImage(oldUrl);
+            }
+
+            // Tải lên các ảnh phụ mới (Base64)
             const uploadedGallery = await Promise.all(
-                req.body.gallery.map(imgStr => uploadBase64ToCloud(imgStr, 'raumapc/gallery'))
+                req.body.gallery.map(async (item) => {
+                    if (item.startsWith('http')) return item; // Bỏ qua ảnh cũ đã giữ lại
+                    return await uploadBase64ToCloud(item, 'raumapc/gallery');
+                })
             );
             req.body.gallery = uploadedGallery.filter(url => url !== "");
         }
@@ -556,7 +598,24 @@ app.put('/api/products/:id', async (req, res) => {
 });
 
 app.delete('/api/products/:id', async (req, res) => {
-    try { await Product.findByIdAndDelete(req.params.id); res.json({ message: "Xóa thành công!" }); } catch (err) { res.status(500).json({ message: "Lỗi xóa!" }); }
+    try { 
+        const product = await Product.findById(req.params.id);
+        if (product) {
+            // Tiêu hủy ảnh chính
+            await deleteCloudinaryImage(product.img);
+            
+            // Tiêu hủy toàn bộ ảnh phụ
+            if (product.gallery && product.gallery.length > 0) {
+                for (let url of product.gallery) {
+                    await deleteCloudinaryImage(url);
+                }
+            }
+            await Product.findByIdAndDelete(req.params.id); 
+        }
+        res.json({ message: "Xóa thành công!" }); 
+    } catch (err) { 
+        res.status(500).json({ message: "Lỗi xóa!" }); 
+    }
 });
 
 app.put('/api/products/:id/view', async (req, res) => {
@@ -928,8 +987,10 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
         
         if (phone) user.phone = phone; 
         
-        // CHẶN BASE64 VÀ ĐẨY LÊN CLOUDINARY (THƯ MỤC AVATARS)
-        if (avatar) {
+        if (avatar && avatar !== user.avatar && avatar.startsWith('data:image')) {
+            // Xóa avatar cũ trên Cloudinary (nếu có)
+            await deleteCloudinaryImage(user.avatar);
+            // Tải avatar mới lên
             user.avatar = await uploadBase64ToCloud(avatar, 'raumapc/avatars');
         }
 
