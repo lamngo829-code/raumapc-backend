@@ -5,7 +5,34 @@ const cors = require('cors');
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs'); 
 const jwt = require('jsonwebtoken');
-const crypto = require('crypto'); // MỚI: Thư viện mã hóa chuẩn để sinh OTP an toàn
+const crypto = require('crypto');
+
+const cloudinary = require('cloudinary').v2;
+
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
+
+// Hàm hỗ trợ "bơm" ảnh Base64 lên mây và lấy link về
+async function uploadBase64ToCloud(base64String, folderName) {
+    // Nếu rỗng hoặc đã là link http (ảnh cũ) thì không cần upload lại
+    if (!base64String || !base64String.startsWith('data:image')) {
+        return base64String; 
+    }
+    try {
+        const result = await cloudinary.uploader.upload(base64String, {
+            folder: folderName,
+            fetch_format: 'auto', // Tự động ép về WebP siêu nhẹ
+            quality: 'auto'       // Tự động nén không giảm chất lượng mắt thường
+        });
+        return result.secure_url; // Trả về link ảnh xịn (https://res.cloudinary.com/...)
+    } catch (error) {
+        console.error("Lỗi upload Cloudinary:", error);
+        return "";
+    }
+}
 
 const app = express();
 app.set('trust proxy', 1);
@@ -22,9 +49,8 @@ app.use(cors({
     credentials: true
 }));
 
-// BẢO MẬT PAYLOAD: 10MB là giới hạn "Vàng". Đủ để lưu 15 ảnh Base64 đã nén qua Canvas, nhưng đủ nhỏ để chặn đứng các cuộc tấn công DoS.
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ limit: '10mb', extended: true }));
+app.use(express.json({ limit: '2mb' }));
+app.use(express.urlencoded({ limit: '2mb', extended: true }));
 
 const rateLimit = require('express-rate-limit');
 const globalLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 300, message: { success: false, message: "Hệ thống đang quá tải từ thiết bị của bạn. Vui lòng thử lại sau 15 phút!" } });
@@ -465,22 +491,63 @@ async function generateAutoId(categoryString) {
     } catch (error) { return prefix + String(Math.floor(Math.random() * 10000000)).padStart(7, '0'); }
 }
 
+// TẠO SẢN PHẨM MỚI
 app.post('/api/products', async (req, res) => {
     try {
-        if (!req.body.productId || req.body.productId.trim() === '') req.body.productId = await generateAutoId(req.body.category);
+        // 1. Quét và đẩy Ảnh chính lên mây
+        if (req.body.img) {
+            req.body.img = await uploadBase64ToCloud(req.body.img, 'raumapc/products');
+        }
+
+        // 2. Quét và đẩy toàn bộ Ảnh phụ (Gallery) lên mây song song
+        if (req.body.gallery && Array.isArray(req.body.gallery)) {
+            const uploadedGallery = await Promise.all(
+                req.body.gallery.map(imgStr => uploadBase64ToCloud(imgStr, 'raumapc/gallery'))
+            );
+            req.body.gallery = uploadedGallery.filter(url => url !== "");
+        }
+
+        // 3. Tiến hành lưu Database với các link ảnh siêu nhẹ
+        if (!req.body.productId || req.body.productId.trim() === '') {
+            req.body.productId = await generateAutoId(req.body.category);
+        }
+        
         const newProduct = new Product(req.body);
         await newProduct.save();
         res.json({ message: "Thêm sản phẩm thành công!" });
-    } catch (err) { res.status(500).json({ message: "Lỗi lưu sản phẩm!" }); }
+    } catch (err) { 
+        res.status(500).json({ message: "Lỗi lưu sản phẩm!" }); 
+    }
 });
 
+// CẬP NHẬT SẢN PHẨM (SỬA)
 app.put('/api/products/:id', async (req, res) => {
     try {
-        if (!req.body.productId || req.body.productId.trim() === '') req.body.productId = await generateAutoId(req.body.category);
-        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) { req.body.stock = 0; req.body.status = 'Hết hàng'; }
+        // Tương tự, chặn luồng ảnh mới khi admin ấn sửa
+        if (req.body.img) {
+            req.body.img = await uploadBase64ToCloud(req.body.img, 'raumapc/products');
+        }
+
+        if (req.body.gallery && Array.isArray(req.body.gallery)) {
+            const uploadedGallery = await Promise.all(
+                req.body.gallery.map(imgStr => uploadBase64ToCloud(imgStr, 'raumapc/gallery'))
+            );
+            req.body.gallery = uploadedGallery.filter(url => url !== "");
+        }
+
+        if (!req.body.productId || req.body.productId.trim() === '') {
+            req.body.productId = await generateAutoId(req.body.category);
+        }
+        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) { 
+            req.body.stock = 0; 
+            req.body.status = 'Hết hàng'; 
+        }
+        
         await Product.findByIdAndUpdate(req.params.id, req.body);
         res.json({ message: "Cập nhật thành công!" });
-    } catch (err) { res.status(500).json({ message: "Lỗi cập nhật!" }); }
+    } catch (err) { 
+        res.status(500).json({ message: "Lỗi cập nhật!" }); 
+    }
 });
 
 app.delete('/api/products/:id', async (req, res) => {
