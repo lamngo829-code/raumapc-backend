@@ -967,10 +967,35 @@ app.post('/api/products/:id/comments', async (req, res) => {
             img = await uploadBase64ToCloud(img, 'raumapc/reviews');
         }
 
-        const newComment = { id: Date.now().toString(), userName: userName || "Khách", userAvatar: userAvatar || "", content: content, rating: rating || 5, img: img || null, date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'}) };
-        product.comments.push(newComment); await product.save();
+        // ==========================================
+        // BẢO MẬT: LỌC NỘI DUNG CHỐNG TẤN CÔNG XSS (DATA SANITIZATION)
+        // ==========================================
+        let safeContent = content ? String(content)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#039;") : "";
+            
+        let safeName = userName ? String(userName)
+            .replace(/</g, "&lt;").replace(/>/g, "&gt;") : "Khách";
+
+        const newComment = { 
+            id: Date.now().toString(), 
+            userName: safeName, 
+            userAvatar: userAvatar || "", 
+            content: safeContent, // Lưu nội dung đã được làm sạch
+            rating: rating || 5, 
+            img: img || null, 
+            date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'}) 
+        };
+        
+        product.comments.push(newComment); 
+        await product.save();
         res.json({ success: true, message: "Đã gửi bình luận!", comments: product.comments });
-    } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); 
+    }
 });
 
 app.post('/api/users/me/update', verifyToken, async (req, res) => {
