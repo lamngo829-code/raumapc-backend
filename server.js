@@ -11,9 +11,6 @@ const cloudinary = require('cloudinary').v2;
 
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
-app.get('/api/config/google', (req, res) => {
-    res.json({ clientId: process.env.GOOGLE_CLIENT_ID });
-});
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -296,6 +293,10 @@ app.post('/api/login', async (req, res) => {
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
         res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+});
+
+app.get('/api/config/google', (req, res) => {
+    res.json({ clientId: process.env.GOOGLE_CLIENT_ID });
 });
 
 // ==========================================
