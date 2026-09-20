@@ -925,6 +925,7 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
             if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
             user.email = email; delete otpCache[email]; 
         }
+        
         if (phone) user.phone = phone; 
         
         // CHẶN BASE64 VÀ ĐẨY LÊN CLOUDINARY (THƯ MỤC AVATARS)
@@ -932,20 +933,28 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
             user.avatar = await uploadBase64ToCloud(avatar, 'raumapc/avatars');
         }
 
-        if (data.success) {
+        // ĐÃ XÓA SẠCH ĐOẠN CODE BỊ LỖI (if data.success...) KHỎI ĐÂY
 
-            localStorage.setItem('currentUser', JSON.stringify(data.user));
-            
-            if (typeof window.updateAccountUI === 'function') {
-                window.updateAccountUI();
-            }
-
-            window.showGlobalAlert("Cập nhật thông tin thành công!", true);
-        }
-        
         await user.save();
-        res.json({ success: true, message: "Cập nhật thành công!", user: { username: user.username, fullName: user.fullName, role: user.role, email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt } });
-    } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+        
+        // Trả kết quả về cho Frontend xử lý tiếp
+        res.json({ 
+            success: true, 
+            message: "Cập nhật thành công!", 
+            user: { 
+                username: user.username, 
+                fullName: user.fullName, 
+                role: user.role, 
+                email: user.email, 
+                phone: user.phone, 
+                cart: user.cart, 
+                avatar: user.avatar, 
+                createdAt: user.createdAt 
+            } 
+        });
+    } catch (err) { 
+        res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); 
+    }
 });
 
 app.delete('/api/users/me', verifyToken, async (req, res) => {
