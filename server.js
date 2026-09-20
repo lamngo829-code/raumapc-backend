@@ -899,9 +899,14 @@ app.delete('/api/orders/:id', async (req, res) => {
 
 app.post('/api/products/:id/comments', async (req, res) => {
     try {
-        const { userName, userAvatar, content, rating, img } = req.body;
+        let { userName, userAvatar, content, rating, img } = req.body;
         const product = await Product.findById(req.params.id);
         if (!product) return res.status(404).json({ success: false, message: "Sản phẩm không tồn tại!" });
+
+        // CHẶN ẢNH ĐÍNH KÈM BÌNH LUẬN VÀ ĐẨY LÊN CLOUDINARY (THƯ MỤC REVIEWS)
+        if (img) {
+            img = await uploadBase64ToCloud(img, 'raumapc/reviews');
+        }
 
         const newComment = { id: Date.now().toString(), userName: userName || "Khách", userAvatar: userAvatar || "", content: content, rating: rating || 5, img: img || null, date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'}) };
         product.comments.push(newComment); await product.save();
@@ -920,7 +925,24 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
             if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
             user.email = email; delete otpCache[email]; 
         }
-        if (phone) user.phone = phone; if (avatar) user.avatar = avatar;
+        if (phone) user.phone = phone; 
+        
+        // CHẶN BASE64 VÀ ĐẨY LÊN CLOUDINARY (THƯ MỤC AVATARS)
+        if (avatar) {
+            user.avatar = await uploadBase64ToCloud(avatar, 'raumapc/avatars');
+        }
+
+        if (data.success) {
+
+            localStorage.setItem('currentUser', JSON.stringify(data.user));
+            
+            if (typeof window.updateAccountUI === 'function') {
+                window.updateAccountUI();
+            }
+
+            window.showGlobalAlert("Cập nhật thông tin thành công!", true);
+        }
+        
         await user.save();
         res.json({ success: true, message: "Cập nhật thành công!", user: { username: user.username, fullName: user.fullName, role: user.role, email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt } });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
