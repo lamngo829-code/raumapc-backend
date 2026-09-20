@@ -11,6 +11,9 @@ const cloudinary = require('cloudinary').v2;
 
 const { OAuth2Client } = require('google-auth-library');
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+app.get('/api/config/google', (req, res) => {
+    res.json({ clientId: process.env.GOOGLE_CLIENT_ID });
+});
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
