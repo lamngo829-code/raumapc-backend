@@ -3,7 +3,7 @@ const geoip = require('geoip-lite');
 const express = require('express');
 const cors = require('cors');
 const mongoose = require('mongoose');
-const bcrypt = require('bcryptjs'); 
+const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 
@@ -21,16 +21,16 @@ cloudinary.config({
 async function uploadBase64ToCloud(base64String, folderName) {
     // 1. Nếu không có gì hoặc đã là link có sẵn (http) thì trả về nguyên vẹn
     if (!base64String || typeof base64String !== 'string' || !base64String.startsWith('data:image')) {
-        return base64String || ""; 
+        return base64String || "";
     }
-    
+
     try {
         const result = await cloudinary.uploader.upload(base64String, {
             folder: folderName,
-            fetch_format: 'auto', 
-            quality: 'auto'       
+            fetch_format: 'auto',
+            quality: 'auto'
         });
-        
+
         // 2. Ép kiểu đảm bảo luôn luôn trả về một chuỗi URL hợp lệ
         if (result && result.secure_url) {
             return String(result.secure_url);
@@ -51,7 +51,7 @@ async function deleteCloudinaryImage(imageUrl) {
         if (parts.length === 2) {
             const pathWithoutVersion = parts[1].replace(/^v\d+\//, ''); // Bỏ mã phiên bản (vd: v1234567/)
             const publicId = pathWithoutVersion.substring(0, pathWithoutVersion.lastIndexOf('.')); // Bỏ đuôi file (.jpg, .png)
-            
+
             if (publicId) {
                 await cloudinary.uploader.destroy(publicId);
                 console.log("🗑 Đã xóa ảnh cũ trên mây:", publicId);
@@ -76,6 +76,43 @@ app.use(cors({
     },
     credentials: true
 }));
+
+// ==========================================
+// HỆ THỐNG CACHE (BỘ NHỚ ĐỆM RAM)
+// ==========================================
+const NodeCache = require("node-cache");
+// Lưu cache trong 5 phút (300 giây). Tự động xóa cache cũ sau 5 phút.
+const myCache = new NodeCache({ stdTTL: 300, checkperiod: 320 });
+
+// Lính gác Cache: Bắt giữ các yêu cầu GET
+const cacheMiddleware = (req, res, next) => {
+    // Chỉ Cache các API lấy dữ liệu (GET)
+    if (req.method !== 'GET') return next();
+
+    // Dùng chính đường dẫn URL làm chìa khóa (VD: /api/products?limit=50)
+    const key = req.originalUrl;
+    const cachedResponse = myCache.get(key);
+
+    if (cachedResponse) {
+        // NẾU TRONG RAM ĐÃ CÓ: Trả về luôn, không cần hỏi MongoDB
+        return res.json(cachedResponse);
+    } else {
+        // NẾU CHƯA CÓ: Lưu tạm hàm res.json gốc lại
+        res.originalJson = res.json;
+        // Viết lại hàm res.json để khi API gọi trả dữ liệu, nó sẽ tiện tay lưu luôn vào RAM
+        res.json = (body) => {
+            myCache.set(key, body);
+            res.originalJson(body);
+        };
+        next();
+    }
+};
+
+// Hàm "Kích hoạt nổ" để xóa sạch Cache khi có biến động dữ liệu
+const clearCache = () => {
+    myCache.flushAll();
+    console.log('🧹 Đã dọn dẹp toàn bộ Cache!');
+};
 
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ limit: '2mb', extended: true }));
@@ -118,29 +155,29 @@ mongoose.connect(process.env.MONGO_URI)
 // ==========================================
 const productSchema = new mongoose.Schema({
     productId: String, name: String, price: String, img: String, warranty: String,
-    status: { type: String, default: 'Còn hàng' }, 
-    stock: { type: Number, default: 10 }, 
+    status: { type: String, default: 'Còn hàng' },
+    stock: { type: Number, default: 10 },
     specs: String, description: String, category: String, brand: String,
     views: { type: Number, default: 0 }, comments: { type: Array, default: [] }, gallery: { type: Array, default: [] }
 });
-productSchema.index({ name: 'text' }); 
+productSchema.index({ name: 'text' });
 const Product = mongoose.model('Product', productSchema);
 
 const orderSchema = new mongoose.Schema({ orderId: String, date: String, username: String, account: String, email: String, items: Array, total: Number, status: String, paymentMethod: String });
 const Order = mongoose.model('Order', orderSchema);
 
-const userSchema = new mongoose.Schema({ 
-    fullName: { type: String, required: true }, 
-    username: { type: String, unique: true, required: true }, 
-    password: { type: String, required: true }, 
-    phone: { type: String, required: true }, 
-    email: { type: String, required: true, index: true }, 
-    role: { type: String, default: 'user' }, 
-    cart: { type: Array, default: [] }, 
+const userSchema = new mongoose.Schema({
+    fullName: { type: String, required: true },
+    username: { type: String, unique: true, required: true },
+    password: { type: String, required: true },
+    phone: { type: String, required: true },
+    email: { type: String, required: true, index: true },
+    role: { type: String, default: 'user' },
+    cart: { type: Array, default: [] },
     avatar: { type: String, default: '' },
     isLocked: { type: Boolean, default: false },
     loginHistory: { type: Array, default: [] },
-    createdAt: { type: Date, default: Date.now } 
+    createdAt: { type: Date, default: Date.now }
 });
 const User = mongoose.model('User', userSchema);
 
@@ -199,13 +236,13 @@ app.post('/api/request-register-otp', async (req, res) => {
     try {
         const email = String(req.body.email);
         const username = String(req.body.username);
-        
+
         const existingUser = await User.findOne({ $or: [{ email: email }, { username: username }] });
         if (existingUser) return res.status(400).json({ success: false, message: "Email hoặc Tên đăng nhập đã được sử dụng!" });
-        
+
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-        
+
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
             <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
@@ -227,7 +264,7 @@ app.post('/api/request-register-otp', async (req, res) => {
             </div>
         </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: email, subject: '[Rau Má PC] Mã OTP Đăng Ký Tài Khoản', message: htmlContent } };
-        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e => console.log(e));
         res.json({ success: true, message: "Mã OTP đăng ký đã được gửi đến Email!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -242,20 +279,20 @@ app.post('/api/register', async (req, res) => {
         const hashedPassword = await bcrypt.hash(password, salt);
         const newUser = new User({ fullName, username, password: hashedPassword, phone, email: safeEmail });
         await newUser.save();
-        delete otpCache[safeEmail]; 
+        delete otpCache[safeEmail];
         res.json({ success: true, message: "Đăng ký thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
 
 app.post('/api/login', async (req, res) => {
     try {
-        const loginId = String(req.body.username); 
-        
+        const loginId = String(req.body.username);
+
         let user = await User.findOne({ $or: [{ username: loginId }, { email: loginId }] });
         let isRole = 'user';
         if (!user) { user = await Admin.findOne({ username: loginId }); isRole = 'admin'; }
         if (!user) return res.status(401).json({ success: false, message: "Sai tài khoản hoặc Email!" });
-        
+
         if (user.isLocked) return res.status(403).json({ success: false, message: "Tài khoản của bạn đã bị Admin khóa do vi phạm chính sách!" });
 
         const isMatch = await bcrypt.compare(String(req.body.password), user.password);
@@ -268,7 +305,7 @@ app.post('/api/login', async (req, res) => {
 
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-        
+
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
             <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
@@ -290,7 +327,7 @@ app.post('/api/login', async (req, res) => {
             </div>
         </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Đăng Nhập', message: htmlContent } };
-        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e => console.log(e));
         res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
@@ -305,13 +342,13 @@ app.get('/api/config/google', (req, res) => {
 app.post('/api/auth/google', async (req, res) => {
     try {
         const { credential } = req.body;
-        
+
         // 1. Nhờ thư viện Google kiểm tra xem mã Token mà Frontend gửi lên có phải đồ thật không
         const ticket = await googleClient.verifyIdToken({
             idToken: credential,
             audience: process.env.GOOGLE_CLIENT_ID,
         });
-        
+
         const payload = ticket.getPayload();
         const { email, name, picture } = payload; // Rút trích thông tin từ Google
 
@@ -323,12 +360,12 @@ app.post('/api/auth/google', async (req, res) => {
             const salt = await bcrypt.genSalt(10);
             // Tạo một mật khẩu ngẫu nhiên siêu khó (vì họ sẽ đăng nhập bằng Google)
             const randomPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), salt);
-            
+
             // Tự động tạo Username dựa trên tên Email
             let baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
             let uniqueUsername = baseUsername;
             let counter = 1;
-            while(await User.findOne({ username: uniqueUsername })) {
+            while (await User.findOne({ username: uniqueUsername })) {
                 uniqueUsername = baseUsername + counter;
                 counter++;
             }
@@ -353,7 +390,7 @@ app.post('/api/auth/google', async (req, res) => {
 
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
         const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
-        
+
         res.json({ success: true, token, user: userData, message: "Đăng nhập Google thành công!" });
 
     } catch (error) {
@@ -367,11 +404,11 @@ app.post('/api/login-verify', async (req, res) => {
         const safeEmail = String(req.body.email);
         const safeOtp = String(req.body.otp);
         const cached = otpCache[safeEmail];
-        
+
         if (!cached) return res.status(400).json({ success: false, message: "Phiên đăng nhập không hợp lệ!" });
         if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN!" });
         if (cached.code !== safeOtp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
-        
+
         const user = await User.findOne({ email: safeEmail });
         const now = new Date().toLocaleString('vi-VN', { hour12: false });
         user.loginHistory.push(now);
@@ -379,7 +416,7 @@ app.post('/api/login-verify', async (req, res) => {
 
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
         const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
-        delete otpCache[safeEmail]; 
+        delete otpCache[safeEmail];
         res.json({ success: true, token, user: userData });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
@@ -389,10 +426,10 @@ app.post('/api/request-otp', async (req, res) => {
         const email = String(req.body.email);
         const user = await User.findOne({ email: email });
         if (!user) return res.status(404).json({ success: false, message: "Email không tồn tại!" });
-        
+
         const otpCode = crypto.randomInt(100000, 1000000).toString();
         otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
-        
+
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
             <div style="background: linear-gradient(135deg, #1435c3 0%, #0a1b66 100%); padding: 25px; text-align: center;">
@@ -414,7 +451,7 @@ app.post('/api/request-otp', async (req, res) => {
             </div>
         </div>`;
         const emailData = { service_id: process.env.EMAILJS_SERVICE_ID, template_id: process.env.EMAILJS_TEMPLATE_ID, user_id: process.env.EMAILJS_USER_ID, accessToken: process.env.EMAILJS_TOKEN, template_params: { to_email: user.email, subject: '[Rau Má PC] Mã OTP Xác Nhận Bảo Mật', message: htmlContent } };
-        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e => console.log(e));
         res.json({ success: true, message: "Mã OTP đã gửi qua Email!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -425,12 +462,12 @@ app.post('/api/forgot-password-verify', async (req, res) => {
         const safeEmail = String(email);
         const cached = otpCache[safeEmail];
         if (!cached || Date.now() > cached.expiresAt || cached.code !== String(otp)) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
-        
+
         const user = await User.findOne({ email: safeEmail });
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        delete otpCache[safeEmail]; 
+        delete otpCache[safeEmail];
         res.json({ success: true, message: "Khôi phục mật khẩu thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -440,10 +477,10 @@ app.post('/api/users/change-password', verifyToken, async (req, res) => {
         const { oldPassword, newPassword } = req.body;
         let user = await User.findById(req.user.id) || await Admin.findById(req.user.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng." });
-        
+
         const isMatch = await bcrypt.compare(String(oldPassword), user.password);
         if (!isMatch) return res.status(400).json({ success: false, message: "Mật khẩu hiện tại không chính xác!" });
-        
+
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
@@ -454,7 +491,7 @@ app.post('/api/users/change-password', verifyToken, async (req, res) => {
 // ==========================================
 // API LẤY DANH SÁCH SẢN PHẨM (CÓ BỘ LỌC NÂNG CAO & PHÂN TRANG)
 // ==========================================
-app.get('/api/products', async (req, res) => {
+app.get('/api/products', cacheMiddleware, async (req, res) => {
     try {
         // 1. NHẬN CÁC THAM SỐ TỪ URL (Query Parameters)
         const page = parseInt(req.query.page) || 1;       // Trang hiện tại (Mặc định: 1)
@@ -501,29 +538,29 @@ app.get('/api/products', async (req, res) => {
         // 4. THỰC THI TRUY VẤN VÀO MONGODB
         // Đếm tổng số sản phẩm thỏa mãn bộ lọc (để Frontend làm nút phân trang 1 2 3...)
         const totalProducts = await Product.countDocuments(filter);
-        
+
         // Lấy đúng số lượng sản phẩm của trang hiện tại
         const products = await Product.find(filter)
-                                      .sort(sortOption)
-                                      .skip(skip)
-                                      .limit(limit);
+            .sort(sortOption)
+            .skip(skip)
+            .limit(limit);
 
         // 5. FORMAT LẠI DỮ LIỆU ĐỂ TRẢ VỀ FRONTEND (Giữ nguyên cấu trúc cũ của bạn)
         const formattedProducts = products.map(sp => ({
-            id: sp._id.toString(), 
-            productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(), 
-            name: sp.name, 
-            price: sp.price, 
-            img: sp.img, 
-            warranty: sp.warranty, 
-            status: sp.status || 'Còn hàng', 
-            stock: sp.stock !== undefined ? sp.stock : 10, 
-            category: sp.category, 
-            brand: sp.brand, 
-            specs: sp.specs, 
+            id: sp._id.toString(),
+            productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
+            name: sp.name,
+            price: sp.price,
+            img: sp.img,
+            warranty: sp.warranty,
+            status: sp.status || 'Còn hàng',
+            stock: sp.stock !== undefined ? sp.stock : 10,
+            category: sp.category,
+            brand: sp.brand,
+            specs: sp.specs,
             description: sp.description,
-            views: sp.views || 0, 
-            comments: sp.comments, 
+            views: sp.views || 0,
+            comments: sp.comments,
             gallery: sp.gallery || []
         }));
 
@@ -539,12 +576,12 @@ app.get('/api/products', async (req, res) => {
             }
         });
 
-    } catch (err) { 
-        res.status(500).json({ success: false, message: "Lỗi Server khi lọc sản phẩm!" }); 
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Lỗi Server khi lọc sản phẩm!" });
     }
 });
 
-app.get('/api/products/detail/:id', async (req, res) => {
+app.get('/api/products/detail/:id', cacheMiddleware, async (req, res) => {
     try {
         const key = req.params.id;
         let sp = mongoose.Types.ObjectId.isValid(key) ? await Product.findById(key) : null;
@@ -575,7 +612,7 @@ async function generateAutoId(categoryString) {
     else if (['wireless-keyboard', 'keyboard'].includes(cat1)) prefix = 'KB';
 
     try {
-        const latestProduct = await Product.findOne({ productId: new RegExp('^' + prefix + '\\d+$') }).sort({ productId: -1 }).collation({ locale: "en_US", numericOrdering: true }); 
+        const latestProduct = await Product.findOne({ productId: new RegExp('^' + prefix + '\\d+$') }).sort({ productId: -1 }).collation({ locale: "en_US", numericOrdering: true });
         let nextNumber = 1;
         if (latestProduct && latestProduct.productId) {
             const currentNumStr = latestProduct.productId.replace(prefix, '');
@@ -606,12 +643,13 @@ app.post('/api/products', async (req, res) => {
         if (!req.body.productId || req.body.productId.trim() === '') {
             req.body.productId = await generateAutoId(req.body.category);
         }
-        
+
         const newProduct = new Product(req.body);
         await newProduct.save();
+        clearCache(); // Gọi lệnh quét dọn
         res.json({ message: "Thêm sản phẩm thành công!" });
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi lưu sản phẩm!" }); 
+    } catch (err) {
+        res.status(500).json({ message: "Lỗi lưu sản phẩm!" });
     }
 });
 
@@ -633,10 +671,10 @@ app.put('/api/products/:id', async (req, res) => {
         if (req.body.gallery && Array.isArray(req.body.gallery)) {
             // Lọc ra các link ảnh cũ mà admin quyết định giữ lại
             const retainedUrls = req.body.gallery.filter(item => item.startsWith('http'));
-            
+
             // Tìm các link ảnh đã bị admin bấm nút Xóa (có trong DB cũ nhưng không có trong danh sách giữ lại)
             const deletedUrls = (existingProduct.gallery || []).filter(oldUrl => !retainedUrls.includes(oldUrl));
-            
+
             // Đem những ảnh bị loại bỏ đi tiêu hủy trên Cloudinary
             for (let oldUrl of deletedUrls) {
                 await deleteCloudinaryImage(oldUrl);
@@ -655,36 +693,38 @@ app.put('/api/products/:id', async (req, res) => {
         if (!req.body.productId || req.body.productId.trim() === '') {
             req.body.productId = await generateAutoId(req.body.category);
         }
-        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) { 
-            req.body.stock = 0; 
-            req.body.status = 'Hết hàng'; 
+        if (req.body.stock !== undefined && parseInt(req.body.stock) <= 0) {
+            req.body.stock = 0;
+            req.body.status = 'Hết hàng';
         }
-        
+
         await Product.findByIdAndUpdate(req.params.id, req.body);
+        clearCache();
         res.json({ message: "Cập nhật thành công!" });
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi cập nhật!" }); 
+    } catch (err) {
+        res.status(500).json({ message: "Lỗi cập nhật!" });
     }
 });
 
 app.delete('/api/products/:id', async (req, res) => {
-    try { 
+    try {
         const product = await Product.findById(req.params.id);
         if (product) {
             // Tiêu hủy ảnh chính
             await deleteCloudinaryImage(product.img);
-            
+
             // Tiêu hủy toàn bộ ảnh phụ
             if (product.gallery && product.gallery.length > 0) {
                 for (let url of product.gallery) {
                     await deleteCloudinaryImage(url);
                 }
             }
-            await Product.findByIdAndDelete(req.params.id); 
+            await Product.findByIdAndDelete(req.params.id);
         }
-        res.json({ message: "Xóa thành công!" }); 
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi xóa!" }); 
+        clearCache();
+        res.json({ message: "Xóa thành công!" });
+    } catch (err) {
+        res.status(500).json({ message: "Lỗi xóa!" });
     }
 });
 
@@ -706,7 +746,7 @@ app.post('/api/orders', async (req, res) => {
 
         if (newOrder.items && newOrder.items.length > 0) {
             for (let item of newOrder.items) {
-                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id; 
+                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id;
                 if (realId && mongoose.Types.ObjectId.isValid(realId)) {
                     let product = await Product.findById(realId);
                     if (product) {
@@ -738,8 +778,8 @@ app.post('/api/orders', async (req, res) => {
         const headerSubtitle = "Đơn hàng đang chờ duyệt";
         const statusTitle = "ĐƠN HÀNG ĐANG CHỜ DUYỆT";
         const statusMessage = "Cảm ơn bạn đã tin tưởng và mua sắm tại hệ thống Rau Má PC. Đơn hàng của bạn đã được hệ thống ghi nhận và đang chờ duyệt!";
-        const color = "#2980b9"; 
-        const bgColor = "#ebf5fb"; 
+        const color = "#2980b9";
+        const bgColor = "#ebf5fb";
 
         const fullHtmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 600px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 8px 20px rgba(0,0,0,0.04);">
@@ -805,11 +845,12 @@ app.post('/api/orders', async (req, res) => {
             accessToken: process.env.EMAILJS_TOKEN,
             template_params: { to_email: "lamngo829@gmail.com", subject: `🚨 CÓ ĐƠN MỚI #${newOrder.orderId}`, message: fullHtmlContent }
         };
-        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(adminEmailData) }).catch(e=>console.log(e));
-        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(adminEmailData) }).catch(e => console.log(e));
+        fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e => console.log(e));
 
         const userCheck = await User.findOne({ username: newOrder.account });
         if (userCheck) { userCheck.cart = []; await userCheck.save(); }
+        clearCache();
         res.json({ message: "Đặt hàng thành công!" });
     } catch (error) { res.status(500).json({ message: "Lỗi khi lưu đơn!" }); }
 });
@@ -827,8 +868,8 @@ app.get('/api/admin/revenue', async (req, res) => {
 
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        
-        const dayOfWeek = now.getDay() || 7; 
+
+        const dayOfWeek = now.getDay() || 7;
         const startOfWeek = new Date(today);
         startOfWeek.setDate(today.getDate() - dayOfWeek + 1);
 
@@ -838,14 +879,14 @@ app.get('/api/admin/revenue', async (req, res) => {
         orders.forEach(o => {
             totalRevenue += o.total || 0;
             totalOrders++;
-            
+
             let dateStr = o.date || "";
             let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-            if(dMatch) {
-                let oDate = new Date(dMatch[3], dMatch[2]-1, dMatch[1]);
-                if(oDate >= startOfWeek) weekRev += o.total || 0;
-                if(oDate >= startOfMonth) monthRev += o.total || 0;
-                if(oDate >= startOfYear) yearRev += o.total || 0;
+            if (dMatch) {
+                let oDate = new Date(dMatch[3], dMatch[2] - 1, dMatch[1]);
+                if (oDate >= startOfWeek) weekRev += o.total || 0;
+                if (oDate >= startOfMonth) monthRev += o.total || 0;
+                if (oDate >= startOfYear) yearRev += o.total || 0;
             }
         });
 
@@ -857,14 +898,14 @@ app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
     try {
         const orders = await Order.find({ status: "Hoàn thành" });
-        
+
         let daily = {}, weekly = {}, monthly = {}, yearly = {};
 
         function getWeekNumber(d) {
             d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay()||7));
-            var yearStart = new Date(Date.UTC(d.getUTCFullYear(),0,1));
-            return Math.ceil((((d - yearStart) / 86400000) + 1)/7);
+            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+            var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
         }
 
         orders.forEach(order => {
@@ -872,8 +913,8 @@ app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
             let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
             if (dMatch) {
                 let d = parseInt(dMatch[1]), m = parseInt(dMatch[2]), y = parseInt(dMatch[3]);
-                let dateObj = new Date(y, m-1, d);
-                
+                let dateObj = new Date(y, m - 1, d);
+
                 let dayKey = `${d}/${m}/${y}`;
                 let weekKey = `Tuần ${getWeekNumber(dateObj)}, ${y}`;
                 let monthKey = `Tháng ${m}/${y}`;
@@ -886,7 +927,7 @@ app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
                 yearly[yearKey] = (yearly[yearKey] || 0) + val;
             }
         });
-        
+
         res.json({
             daily: { labels: Object.keys(daily), data: Object.values(daily) },
             weekly: { labels: Object.keys(weekly), data: Object.values(weekly) },
@@ -903,37 +944,37 @@ app.put('/api/users/cart', verifyToken, async (req, res) => {
 app.put('/api/orders/:id/status', async (req, res) => {
     try {
         const order = await Order.findOneAndUpdate(
-            { orderId: req.params.id }, 
-            { status: req.body.status }, 
+            { orderId: req.params.id },
+            { status: req.body.status },
             { returnDocument: 'after' }
         );
-        
+
         let statusTitle = ""; let statusMessage = ""; let color = ""; let bgColor = ""; let emailSubject = ""; let headerSubtitle = "";
-        
+
         if (order.status === "Đang giao hàng") {
             emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đang được giao đến bạn`;
             headerSubtitle = "Đơn hàng đang được giao";
             statusTitle = "ĐƠN HÀNG ĐANG ĐƯỢC GIAO";
             statusMessage = "Tuyệt vời! Đơn hàng của bạn đã được bàn giao cho đơn vị vận chuyển và đang trên đường đến với bạn. Vui lòng chú ý điện thoại để nhận hàng nhé!";
-            color = "#f39c12"; bgColor = "#fdf8e4"; 
+            color = "#f39c12"; bgColor = "#fdf8e4";
         } else if (order.status === "Hoàn thành") {
             emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đã giao thành công`;
             headerSubtitle = "Giao hàng thành công";
             statusTitle = "GIAO HÀNG THÀNH CÔNG";
             statusMessage = "Đơn hàng của bạn đã được giao thành công. Rau Má PC rất cảm ơn bạn đã tin tưởng và ủng hộ. Chúc bạn có những trải nghiệm tuyệt vời cùng dàn máy của mình!";
-            color = "#27ae60"; bgColor = "#eafaf1"; 
+            color = "#27ae60"; bgColor = "#eafaf1";
         } else if (order.status === "Đã hủy") {
             emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đã bị hủy`;
             headerSubtitle = "Đơn hàng đã hủy";
             statusTitle = "ĐƠN HÀNG ĐÃ HỦY";
             statusMessage = "Đơn hàng của bạn đã bị hủy trên hệ thống. Nếu có bất kỳ thắc mắc nào hoặc muốn đặt lại hàng, hãy liên hệ ngay với Rau Má PC nhé!";
-            color = "#e74c3c"; bgColor = "#fdedec"; 
+            color = "#e74c3c"; bgColor = "#fdedec";
         } else {
             emailSubject = `[Rau Má PC] Đơn hàng #${order.orderId} đang chờ xác nhận`;
             headerSubtitle = "Đơn hàng đang chờ duyệt";
             statusTitle = "ĐƠN HÀNG ĐANG CHỜ DUYỆT";
             statusMessage = "Cảm ơn bạn đã tin tưởng và mua sắm tại hệ thống Rau Má PC. Đơn hàng của bạn đã được hệ thống ghi nhận và đang chờ duyệt!";
-            color = "#2980b9"; bgColor = "#ebf5fb"; 
+            color = "#2980b9"; bgColor = "#ebf5fb";
         }
 
         let cusName = order.username;
@@ -1002,12 +1043,12 @@ app.put('/api/orders/:id/status', async (req, res) => {
 
         const emailData = {
             service_id: process.env.EMAILJS_SERVICE_ID,
-            template_id: process.env.EMAILJS_TEMPLATE_ID, 
+            template_id: process.env.EMAILJS_TEMPLATE_ID,
             user_id: process.env.EMAILJS_USER_ID,
-            accessToken: process.env.EMAILJS_TOKEN, 
+            accessToken: process.env.EMAILJS_TOKEN,
             template_params: {
                 to_email: order.email,
-                subject: emailSubject, 
+                subject: emailSubject,
                 message: htmlContent
             }
         };
@@ -1046,25 +1087,26 @@ app.post('/api/products/:id/comments', async (req, res) => {
             .replace(/>/g, "&gt;")
             .replace(/"/g, "&quot;")
             .replace(/'/g, "&#039;") : "";
-            
+
         let safeName = userName ? String(userName)
             .replace(/</g, "&lt;").replace(/>/g, "&gt;") : "Khách";
 
-        const newComment = { 
-            id: Date.now().toString(), 
-            userName: safeName, 
-            userAvatar: userAvatar || "", 
+        const newComment = {
+            id: Date.now().toString(),
+            userName: safeName,
+            userAvatar: userAvatar || "",
             content: safeContent, // Lưu nội dung đã được làm sạch
-            rating: rating || 5, 
-            img: img || null, 
-            date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', {hour: '2-digit', minute:'2-digit'}) 
+            rating: rating || 5,
+            img: img || null,
+            date: new Date().toLocaleDateString('vi-VN') + ' ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
         };
-        
-        product.comments.push(newComment); 
+
+        product.comments.push(newComment);
         await product.save();
+        clearCache();
         res.json({ success: true, message: "Đã gửi bình luận!", comments: product.comments });
-    } catch (err) { 
-        res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); 
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Lỗi máy chủ!" });
     }
 });
 
@@ -1072,16 +1114,16 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
     try {
         const { phone, email, otp, avatar } = req.body;
         let user = await User.findById(req.user.id);
-        if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng."});
+        if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng." });
 
         if (email && email !== user.email) {
-             const cached = otpCache[email];
+            const cached = otpCache[email];
             if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
-            user.email = email; delete otpCache[email]; 
+            user.email = email; delete otpCache[email];
         }
-        
-        if (phone) user.phone = phone; 
-        
+
+        if (phone) user.phone = phone;
+
         if (avatar && avatar !== user.avatar && avatar.startsWith('data:image')) {
             // Xóa avatar cũ trên Cloudinary (nếu có)
             await deleteCloudinaryImage(user.avatar);
@@ -1092,24 +1134,24 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
         // ĐÃ XÓA SẠCH ĐOẠN CODE BỊ LỖI (if data.success...) KHỎI ĐÂY
 
         await user.save();
-        
+
         // Trả kết quả về cho Frontend xử lý tiếp
-        res.json({ 
-            success: true, 
-            message: "Cập nhật thành công!", 
-            user: { 
-                username: user.username, 
-                fullName: user.fullName, 
-                role: user.role, 
-                email: user.email, 
-                phone: user.phone, 
-                cart: user.cart, 
-                avatar: user.avatar, 
-                createdAt: user.createdAt 
-            } 
+        res.json({
+            success: true,
+            message: "Cập nhật thành công!",
+            user: {
+                username: user.username,
+                fullName: user.fullName,
+                role: user.role,
+                email: user.email,
+                phone: user.phone,
+                cart: user.cart,
+                avatar: user.avatar,
+                createdAt: user.createdAt
+            }
         });
-    } catch (err) { 
-        res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); 
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Lỗi máy chủ!" });
     }
 });
 
@@ -1117,7 +1159,7 @@ app.delete('/api/users/me', verifyToken, async (req, res) => {
     try { if (req.user.role === 'admin') await Admin.findByIdAndDelete(req.user.id); else await User.findByIdAndDelete(req.user.id); res.json({ success: true, message: "Đã xóa tài khoản!" }); } catch (err) { res.status(500).json({ success: false }); }
 });
 
-app.get('/api/settings/home', async (req, res) => { try { const homeSettings = await Setting.findOne({ key: 'homeConfig' }); res.json(homeSettings ? homeSettings.data : {}); } catch (err) { res.status(500).json({}); } });
+app.get('/api/settings/home', cacheMiddleware, async (req, res) => { try { const homeSettings = await Setting.findOne({ key: 'homeConfig' }); res.json(homeSettings ? homeSettings.data : {}); } catch (err) { res.status(500).json({}); } });
 app.put('/api/settings/home', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Từ chối!" });
     try { await Setting.findOneAndUpdate({ key: 'homeConfig' }, { data: req.body }, { upsert: true, new: true }); res.json({ success: true, message: "Đã đồng bộ!" }); } catch (err) { res.status(500).json({ success: false }); }
@@ -1158,9 +1200,9 @@ app.post('/api/coupons/apply', async (req, res) => {
 // ==========================================
 app.get('/api/admin/users', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
-    try { 
+    try {
         const users = await User.find({ role: 'user' }).select('-password').sort({ createdAt: -1 });
-        res.json(users); 
+        res.json(users);
     } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
 });
 
@@ -1169,8 +1211,8 @@ app.put('/api/admin/users/:id/lock', verifyToken, async (req, res) => {
     try {
         let user = await User.findById(req.params.id);
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy user!" });
-        
-        user.isLocked = !user.isLocked; 
+
+        user.isLocked = !user.isLocked;
         await user.save();
         res.json({ success: true, message: user.isLocked ? "Đã khóa tài khoản thành công!" : "Đã mở khóa tài khoản!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi thực thi!" }); }
@@ -1178,15 +1220,15 @@ app.put('/api/admin/users/:id/lock', verifyToken, async (req, res) => {
 
 app.delete('/api/admin/users/:id', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
-    try { 
-        await User.findByIdAndDelete(req.params.id); 
-        res.json({ success: true, message: "Đã xóa vĩnh viễn tài khoản!" }); 
+    try {
+        await User.findByIdAndDelete(req.params.id);
+        res.json({ success: true, message: "Đã xóa vĩnh viễn tài khoản!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi xóa tài khoản!" }); }
 });
 
 app.put('/api/admin/users/:id/change-password', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
-    
+
     try {
         const { newPassword } = req.body;
         if (!newPassword || newPassword.length < 6) return res.status(400).json({ success: false, message: "Mật khẩu mới phải từ 6 ký tự trở lên!" });

@@ -23,6 +23,7 @@
     "jsonwebtoken": "^9.0.3",
     "mongodb": "^7.5.0",
     "mongoose": "^9.9.3",
+    "node-cache": "^5.1.2",
     "nodemailer": "^9.0.5"
   }
 }
