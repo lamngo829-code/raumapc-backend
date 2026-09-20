@@ -9,6 +9,9 @@ const crypto = require('crypto');
 
 const cloudinary = require('cloudinary').v2;
 
+const { OAuth2Client } = require('google-auth-library');
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
     api_key: process.env.CLOUDINARY_API_KEY,
@@ -290,6 +293,69 @@ app.post('/api/login', async (req, res) => {
         fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e=>console.log(e));
         res.json({ success: true, requireOtp: true, email: user.email, message: "Mã OTP đã được gửi đến email." });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
+});
+
+// ==========================================
+// API: ĐĂNG NHẬP / ĐĂNG KÝ BẰNG GOOGLE OAUTH
+// ==========================================
+app.post('/api/auth/google', async (req, res) => {
+    try {
+        const { credential } = req.body;
+        
+        // 1. Nhờ thư viện Google kiểm tra xem mã Token mà Frontend gửi lên có phải đồ thật không
+        const ticket = await googleClient.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+        
+        const payload = ticket.getPayload();
+        const { email, name, picture } = payload; // Rút trích thông tin từ Google
+
+        // 2. Kiểm tra xem Email này đã từng đăng ký ở Rau Má PC chưa
+        let user = await User.findOne({ email: email });
+
+        if (!user) {
+            // NẾU LÀ NGƯỜI MỚI TOANH: Tự động tạo tài khoản luôn mà không cần hỏi thêm
+            const salt = await bcrypt.genSalt(10);
+            // Tạo một mật khẩu ngẫu nhiên siêu khó (vì họ sẽ đăng nhập bằng Google)
+            const randomPassword = await bcrypt.hash(crypto.randomBytes(16).toString('hex'), salt);
+            
+            // Tự động tạo Username dựa trên tên Email
+            let baseUsername = email.split('@')[0].replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+            let uniqueUsername = baseUsername;
+            let counter = 1;
+            while(await User.findOne({ username: uniqueUsername })) {
+                uniqueUsername = baseUsername + counter;
+                counter++;
+            }
+
+            user = new User({
+                fullName: name,
+                username: uniqueUsername,
+                password: randomPassword,
+                phone: "Chưa cập nhật",
+                email: email,
+                avatar: picture // Lấy luôn ảnh đại diện từ Google
+            });
+            await user.save();
+        }
+
+        if (user.isLocked) return res.status(403).json({ success: false, message: "Tài khoản của bạn đã bị khóa do vi phạm chính sách!" });
+
+        // 3. Đăng nhập thành công, tạo Token và gửi về Frontend
+        const now = new Date().toLocaleString('vi-VN', { hour12: false });
+        user.loginHistory.push(now);
+        await user.save();
+
+        const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, process.env.JWT_SECRET, { expiresIn: '7d' });
+        const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
+        
+        res.json({ success: true, token, user: userData, message: "Đăng nhập Google thành công!" });
+
+    } catch (error) {
+        console.error("Lỗi Google Auth:", error);
+        res.status(401).json({ success: false, message: "Xác thực Google thất bại hoặc hết hạn!" });
+    }
 });
 
 app.post('/api/login-verify', async (req, res) => {
