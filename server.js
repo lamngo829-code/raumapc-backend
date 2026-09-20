@@ -15,22 +15,27 @@ cloudinary.config({
     api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-// Hàm hỗ trợ "bơm" ảnh Base64 lên mây và lấy link về
 async function uploadBase64ToCloud(base64String, folderName) {
-    // Nếu rỗng hoặc đã là link http (ảnh cũ) thì không cần upload lại
-    if (!base64String || !base64String.startsWith('data:image')) {
-        return base64String; 
+    // 1. Nếu không có gì hoặc đã là link có sẵn (http) thì trả về nguyên vẹn
+    if (!base64String || typeof base64String !== 'string' || !base64String.startsWith('data:image')) {
+        return base64String || ""; 
     }
+    
     try {
         const result = await cloudinary.uploader.upload(base64String, {
             folder: folderName,
-            fetch_format: 'auto', // Tự động ép về WebP siêu nhẹ
-            quality: 'auto'       // Tự động nén không giảm chất lượng mắt thường
+            fetch_format: 'auto', 
+            quality: 'auto'       
         });
-        return result.secure_url; // Trả về link ảnh xịn (https://res.cloudinary.com/...)
+        
+        // 2. Ép kiểu đảm bảo luôn luôn trả về một chuỗi URL hợp lệ
+        if (result && result.secure_url) {
+            return String(result.secure_url);
+        }
+        return "";
     } catch (error) {
         console.error("Lỗi upload Cloudinary:", error);
-        return "";
+        return ""; // Trả về chuỗi rỗng nếu lỗi, tránh sập Database
     }
 }
 
