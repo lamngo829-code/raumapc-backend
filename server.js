@@ -202,7 +202,19 @@ const verifyToken = async (req, res, next) => {
     } catch (err) { return res.status(401).json({ message: "Phiên đăng nhập hết hạn!" }); }
 };
 
-app.get('/api/auth/verify', verifyToken, (req, res) => { res.json({ success: true }); });
+// KIỂM TRA BẢO MẬT VÀ TRẢ VỀ GIỎ HÀNG MỚI NHẤT TỪ CLOUD
+app.get('/api/auth/verify', verifyToken, async (req, res) => { 
+    try {
+        let user = await User.findById(req.user.id) || await Admin.findById(req.user.id);
+        res.json({ 
+            success: true, 
+            // Trả về giỏ hàng mới nhất lưu trong Database
+            cart: user ? user.cart : [] 
+        }); 
+    } catch (err) {
+        res.json({ success: true });
+    }
+});
 
 app.get('/api/setup-admin', async (req, res) => {
     try {
