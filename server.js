@@ -765,25 +765,25 @@ app.put('/api/products/:id/view', async (req, res) => {
 // 1. Gửi thông tin đơn hàng sang VNPay để tạo Link thanh toán
 app.post('/api/vnpay/create_url', async (req, res) => {
     try {
-        let ipAddr = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
-        // Bắt buộc chuẩn hóa IP về 1 địa chỉ duy nhất
-        if (typeof ipAddr === 'string' && ipAddr.includes(',')) {
-            ipAddr = ipAddr.split(',')[0].trim();
-        }
-        if (ipAddr === '::1') {
-            ipAddr = '127.0.0.1';
-        }
+        // CHỐNG LỖI 1: Cố định IP để tránh lỗi chuỗi IPv6 quá dài trên Render
+        let ipAddr = '127.0.0.1';
 
-        // Cấu hình mã Sandbox VNPay
-        let tmnCode = process.env.VNP_TMNCODE;
-        let secretKey = process.env.VNP_HASHSECRET;
+        // CHỐNG LỖI 2: Phòng hờ trường hợp Render không đọc được file .env
+        let tmnCode = process.env.VNP_TMNCODE || "7TEN2MKH";
+        let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
         let vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-
-        // Link web của bạn để VNPay trả khách về sau khi quẹt thẻ xong
         let returnUrl = req.body.returnUrl || "https://raumapc-frontend.vercel.app/pages/info/tracking.html";
 
+        // CHỐNG LỖI 3: Ép buộc đồng hồ hệ thống chạy theo Múi giờ Việt Nam (UTC+7)
         let date = new Date();
-        let createDate = date.getFullYear() + ('0' + (date.getMonth() + 1)).slice(-2) + ('0' + date.getDate()).slice(-2) + ('0' + date.getHours()).slice(-2) + ('0' + date.getMinutes()).slice(-2) + ('0' + date.getSeconds()).slice(-2);
+        let utc = date.getTime() + (date.getTimezoneOffset() * 60000);
+        let vnTime = new Date(utc + (3600000 * 7));
+
+        let createDate = vnTime.getFullYear() + ('0' + (vnTime.getMonth() + 1)).slice(-2) + ('0' + vnTime.getDate()).slice(-2) + ('0' + vnTime.getHours()).slice(-2) + ('0' + vnTime.getMinutes()).slice(-2) + ('0' + vnTime.getSeconds()).slice(-2);
+
+        // CHỐNG LỖI 4: Thêm thời gian hết hạn (15 phút sau) - Bắt buộc với tài khoản mới
+        vnTime.setMinutes(vnTime.getMinutes() + 15);
+        let expireDate = vnTime.getFullYear() + ('0' + (vnTime.getMonth() + 1)).slice(-2) + ('0' + vnTime.getDate()).slice(-2) + ('0' + vnTime.getHours()).slice(-2) + ('0' + vnTime.getMinutes()).slice(-2) + ('0' + vnTime.getSeconds()).slice(-2);
 
         let orderId = req.body.orderId;
         let amount = req.body.amount;
@@ -794,23 +794,30 @@ app.post('/api/vnpay/create_url', async (req, res) => {
         vnp_Params['vnp_TmnCode'] = tmnCode;
         vnp_Params['vnp_Locale'] = 'vn';
         vnp_Params['vnp_CurrCode'] = 'VND';
-        vnp_Params['vnp_TxnRef'] = orderId;
+        vnp_Params['vnp_TxnRef'] = String(orderId).replace(/[^a-zA-Z0-9]/g, '');
         vnp_Params['vnp_OrderInfo'] = 'Thanh toan don hang ' + String(orderId).replace(/[^a-zA-Z0-9]/g, '');
         vnp_Params['vnp_OrderType'] = 'other';
-        vnp_Params['vnp_Amount'] = Math.round(amount * 100);
+        vnp_Params['vnp_Amount'] = Math.round(Number(amount) * 100);
         vnp_Params['vnp_ReturnUrl'] = returnUrl;
         vnp_Params['vnp_IpAddr'] = ipAddr;
         vnp_Params['vnp_CreateDate'] = createDate;
+        vnp_Params['vnp_ExpireDate'] = expireDate; // Tham số cứu tinh
 
         vnp_Params = sortObject(vnp_Params);
         let signData = querystring.stringify(vnp_Params, { encode: false });
         let hmac = crypto.createHmac("sha512", secretKey);
-        let signed = hmac.update(new Buffer.from(signData, 'utf-8')).digest("hex");
+
+        // CHỐNG LỖI 5: Cú pháp Buffer chuẩn của Node.js bản mới
+        let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+
         vnp_Params['vnp_SecureHash'] = signed;
         vnpUrl += '?' + querystring.stringify(vnp_Params, { encode: false });
 
         res.json({ success: true, url: vnpUrl });
-    } catch (err) { res.status(500).json({ success: false, message: "Lỗi tạo link VNPay" }); }
+    } catch (err) {
+        console.error("Lỗi VNPay:", err);
+        res.status(500).json({ success: false, message: "Lỗi tạo link VNPay" });
+    }
 });
 
 // 2. IPN (Bắt tín hiệu ngầm từ VNPay báo về để tự động duyệt đơn)
@@ -822,20 +829,18 @@ app.get('/api/vnpay/ipn', async (req, res) => {
         delete vnp_Params['vnp_SecureHashType'];
 
         vnp_Params = sortObject(vnp_Params);
-        let secretKey = process.env.VNP_HASHSECRET;
+        let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
         let signData = querystring.stringify(vnp_Params, { encode: false });
         let hmac = crypto.createHmac("sha512", secretKey);
-        let signed = hmac.update(new Buffer.from(signData, 'utf-8')).digest("hex");
+        let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
 
         if (secureHash === signed) {
             let orderId = vnp_Params['vnp_TxnRef'];
             let rspCode = vnp_Params['vnp_ResponseCode'];
 
-            // Nếu khách quẹt thẻ thành công (Mã 00)
             if (rspCode === '00') {
                 let order = await Order.findOne({ orderId: orderId });
-                // TỰ ĐỘNG CHUYỂN TRẠNG THÁI MÀ KHÔNG CẦN ADMIN
-                if (order && order.status === 'Đang chờ duyệt') {
+                if (order && order.status === 'Đang chờ thanh toán') {
                     order.status = 'Đang giao hàng';
                     await order.save();
                 }
