@@ -154,7 +154,7 @@ mongoose.connect(process.env.MONGO_URI)
 // KHUÔN MẪU DỮ LIỆU
 // ==========================================
 const productSchema = new mongoose.Schema({
-    productId: String, name: String, price: String, img: String, warranty: String,
+    productId: String, name: String, price: Number, img: String, warranty: String,
     status: { type: String, default: 'Còn hàng' },
     stock: { type: Number, default: 10 },
     specs: String, description: String, category: String, brand: String,
@@ -524,6 +524,15 @@ app.get('/api/products', cacheMiddleware, async (req, res) => {
         // Lọc theo trạng thái (VD: Chỉ hiện hàng "Còn hàng")
         if (req.query.status) {
             filter.status = req.query.status;
+        }
+
+        // =====================================
+        // LỌC KHOẢNG GIÁ SIÊU TỐC TRONG MONGODB
+        // =====================================
+        if (req.query.minPrice !== undefined || req.query.maxPrice !== undefined) {
+            filter.price = {};
+            if (req.query.minPrice) filter.price.$gte = parseInt(req.query.minPrice); // Lớn hơn hoặc bằng
+            if (req.query.maxPrice) filter.price.$lte = parseInt(req.query.maxPrice); // Nhỏ hơn hoặc bằng
         }
 
         // 3. KHỞI TẠO TÙY CHỌN SẮP XẾP (Sort)
@@ -1256,4 +1265,37 @@ app.post('/api/admin/change-password', verifyToken, async (req, res) => {
 });
 
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date().toISOString() }); });
+
+// ==========================================
+// API BÍ MẬT: CHUẨN HÓA DỮ LIỆU GIÁ (CHẠY 1 LẦN DUY NHẤT)
+// ==========================================
+app.get('/api/admin/fix-price-data', async (req, res) => {
+    try {
+        const products = await Product.find({});
+        let updatedCount = 0;
+        
+        for (let sp of products) {
+            // Kiểm tra xem giá có đang bị lưu dưới dạng chữ (chứa "đ", dấu chấm) không
+            if (typeof sp.price === 'string') {
+                // Rút trích chỉ lấy các con số (Cắt bỏ "đ" và dấu "."), ví dụ: "5.000.000đ" -> 5000000
+                let numPrice = parseInt(sp.price.replace(/\D/g, '')) || 0;
+                
+                // Cập nhật lại vào Database dưới dạng Number chuẩn
+                await Product.updateOne({ _id: sp._id }, { $set: { price: numPrice } });
+                updatedCount++;
+            }
+        }
+        
+        // Nếu bạn đã cài Caching ở bài trước, hãy xóa Cache để dữ liệu mới cập nhật
+        if (typeof clearCache === 'function') clearCache();
+
+        res.json({ 
+            success: true, 
+            message: `Ca đại phẫu thành công! Đã chuyển đổi ${updatedCount} sản phẩm sang định dạng Số.` 
+        });
+    } catch (err) { 
+        res.status(500).json({ success: false, message: err.message }); 
+    }
+});
+
 app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
