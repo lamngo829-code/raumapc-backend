@@ -759,35 +759,60 @@ app.put('/api/products/:id/view', async (req, res) => {
 });
 
 // ==========================================
-// API TÍCH HỢP THANH TOÁN VNPAY (TỰ ĐỘNG HÓA)
+// API TÍCH HỢP THANH TOÁN VNPAY (TỰ ĐỘNG HÓA CHUẨN 2026)
 // ==========================================
+
+// Hàm sắp xếp Object chuẩn xác theo yêu cầu của VNPay
+function sortObject(obj) {
+    let sorted = {};
+    let str = [];
+    let key;
+    for (key in obj) {
+        if (obj.hasOwnProperty(key)) {
+            str.push(encodeURIComponent(key));
+        }
+    }
+    str.sort();
+    for (key = 0; key < str.length; key++) {
+        sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, "+");
+    }
+    return sorted;
+}
 
 // 1. Gửi thông tin đơn hàng sang VNPay để tạo Link thanh toán
 app.post('/api/vnpay/create_url', async (req, res) => {
     try {
-        // CHỐNG LỖI 1: Cố định IP để tránh lỗi chuỗi IPv6 quá dài trên Render
         let ipAddr = '127.0.0.1';
 
-        // CHỐNG LỖI 2: Phòng hờ trường hợp Render không đọc được file .env
         let tmnCode = process.env.VNP_TMNCODE || "7TEN2MKH";
         let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
         let vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
         let returnUrl = req.body.returnUrl || "https://raumapc-frontend.vercel.app/pages/info/tracking.html";
 
-        // CHỐNG LỖI 3: Ép buộc đồng hồ hệ thống chạy theo Múi giờ Việt Nam (UTC+7)
+        // Định dạng thời gian chuẩn "yyyyMMddHHmmss" theo múi giờ VN (UTC+7)
         let date = new Date();
         let utc = date.getTime() + (date.getTimezoneOffset() * 60000);
         let vnTime = new Date(utc + (3600000 * 7));
 
-        let createDate = vnTime.getFullYear() + ('0' + (vnTime.getMonth() + 1)).slice(-2) + ('0' + vnTime.getDate()).slice(-2) + ('0' + vnTime.getHours()).slice(-2) + ('0' + vnTime.getMinutes()).slice(-2) + ('0' + vnTime.getSeconds()).slice(-2);
+        let createDate = vnTime.getFullYear().toString() + 
+                         ('0' + (vnTime.getMonth() + 1)).slice(-2) + 
+                         ('0' + vnTime.getDate()).slice(-2) + 
+                         ('0' + vnTime.getHours()).slice(-2) + 
+                         ('0' + vnTime.getMinutes()).slice(-2) + 
+                         ('0' + vnTime.getSeconds()).slice(-2);
 
-        // CHỐNG LỖI 4: Thêm thời gian hết hạn (15 phút sau) - Bắt buộc với tài khoản mới
         vnTime.setMinutes(vnTime.getMinutes() + 15);
-        let expireDate = vnTime.getFullYear() + ('0' + (vnTime.getMonth() + 1)).slice(-2) + ('0' + vnTime.getDate()).slice(-2) + ('0' + vnTime.getHours()).slice(-2) + ('0' + vnTime.getMinutes()).slice(-2) + ('0' + vnTime.getSeconds()).slice(-2);
+        let expireDate = vnTime.getFullYear().toString() + 
+                         ('0' + (vnTime.getMonth() + 1)).slice(-2) + 
+                         ('0' + vnTime.getDate()).slice(-2) + 
+                         ('0' + vnTime.getHours()).slice(-2) + 
+                         ('0' + vnTime.getMinutes()).slice(-2) + 
+                         ('0' + vnTime.getSeconds()).slice(-2);
 
         let orderId = req.body.orderId;
         let amount = req.body.amount;
 
+        // Xây dựng danh sách tham số (Chỉ chứa các ký tự hợp lệ)
         let vnp_Params = {};
         vnp_Params['vnp_Version'] = '2.1.0';
         vnp_Params['vnp_Command'] = 'pay';
@@ -801,16 +826,20 @@ app.post('/api/vnpay/create_url', async (req, res) => {
         vnp_Params['vnp_ReturnUrl'] = returnUrl;
         vnp_Params['vnp_IpAddr'] = ipAddr;
         vnp_Params['vnp_CreateDate'] = createDate;
-        vnp_Params['vnp_ExpireDate'] = expireDate; // Tham số cứu tinh
+        vnp_Params['vnp_ExpireDate'] = expireDate;
 
+        // BẮT BUỘC: Sắp xếp object trước khi mã hóa
         vnp_Params = sortObject(vnp_Params);
+
+        // THUẬT TOÁN TẠO CHỮ KÝ BẢO MẬT CHUẨN (Mới cập nhật)
         let signData = querystring.stringify(vnp_Params, { encode: false });
         let hmac = crypto.createHmac("sha512", secretKey);
-
-        // CHỐNG LỖI 5: Cú pháp Buffer chuẩn của Node.js bản mới
-        let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+        // Sử dụng chuỗi gốc để tạo hash, không ép kiểu Buffer tùy tiện
+        let signed = hmac.update(signData, 'utf-8').digest("hex"); 
 
         vnp_Params['vnp_SecureHash'] = signed;
+        
+        // Tạo URL cuối cùng
         vnpUrl += '?' + querystring.stringify(vnp_Params, { encode: false });
 
         res.json({ success: true, url: vnpUrl });
@@ -825,14 +854,17 @@ app.get('/api/vnpay/ipn', async (req, res) => {
     try {
         let vnp_Params = req.query;
         let secureHash = vnp_Params['vnp_SecureHash'];
+        
+        // Xóa mã hash cũ đi để tạo lại mã hash mới từ dữ liệu thực tế
         delete vnp_Params['vnp_SecureHash'];
         delete vnp_Params['vnp_SecureHashType'];
 
         vnp_Params = sortObject(vnp_Params);
+        
         let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
         let signData = querystring.stringify(vnp_Params, { encode: false });
         let hmac = crypto.createHmac("sha512", secretKey);
-        let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+        let signed = hmac.update(signData, 'utf-8').digest("hex");
 
         if (secureHash === signed) {
             let orderId = vnp_Params['vnp_TxnRef'];
@@ -840,14 +872,19 @@ app.get('/api/vnpay/ipn', async (req, res) => {
 
             if (rspCode === '00') {
                 let order = await Order.findOne({ orderId: orderId });
+                // Cập nhật trạng thái
                 if (order && order.status === 'Đang chờ thanh toán') {
                     order.status = 'Đang giao hàng';
                     await order.save();
                 }
             }
             res.status(200).json({ RspCode: '00', Message: 'Thành công' });
-        } else { res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' }); }
-    } catch (err) { res.status(500).json({ RspCode: '99', Message: 'Lỗi máy chủ' }); }
+        } else {
+            res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' });
+        }
+    } catch (err) {
+        res.status(500).json({ RspCode: '99', Message: 'Lỗi máy chủ' });
+    }
 });
 
 // ==========================================
