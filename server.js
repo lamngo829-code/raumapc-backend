@@ -1299,6 +1299,59 @@ app.post('/api/admin/change-password', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" }); }
 });
 
+// ==========================================
+// API QUẢN TRỊ BÌNH LUẬN & ĐÁNH GIÁ (ADMIN)
+// ==========================================
+// 1. Lấy toàn bộ bình luận của tất cả sản phẩm
+app.get('/api/admin/comments', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try {
+        const products = await Product.find({ "comments.0": { $exists: true } });
+        let allComments = [];
+        products.forEach(p => {
+            p.comments.forEach(c => {
+                allComments.push({ productId: p._id, productName: p.name, productImg: p.img, ...c });
+            });
+        });
+        // Sắp xếp bình luận mới nhất lên đầu
+        allComments.sort((a, b) => b.id - a.id);
+        res.json(allComments);
+    } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
+});
+
+// 2. Xóa bình luận & Tiêu hủy ảnh đính kèm
+app.delete('/api/admin/comments/:productId/:commentId', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try {
+        const product = await Product.findById(req.params.productId);
+        if (!product) return res.status(404).json({ success: false, message: "Không tìm thấy sản phẩm!" });
+        
+        const cmt = product.comments.find(c => c.id === req.params.commentId);
+        if(cmt && cmt.img) await deleteCloudinaryImage(cmt.img); // Xóa ảnh rác trên Cloudinary
+
+        product.comments = product.comments.filter(c => c.id !== req.params.commentId);
+        await product.save();
+        clearCache();
+        res.json({ success: true, message: "Đã xóa vĩnh viễn bình luận!" });
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
+});
+
+// 3. Admin trả lời bình luận
+app.put('/api/admin/comments/:productId/:commentId/reply', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try {
+        const product = await Product.findById(req.params.productId);
+        const commentIndex = product.comments.findIndex(c => c.id === req.params.commentId);
+        
+        product.comments[commentIndex].adminReply = req.body.replyText;
+        product.markModified('comments'); // Báo cho MongoDB biết mảng Array đã bị thay đổi
+        await product.save();
+        
+        clearCache();
+        res.json({ success: true, message: "Đã gửi phản hồi thành công!" });
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
+});
+
 app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date().toISOString() }); });
 
 // ==========================================
