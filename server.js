@@ -879,6 +879,29 @@ app.post('/api/orders', async (req, res) => {
 app.get('/api/orders', async (req, res) => { try { res.json(await Order.find()); } catch (err) { res.status(500).json({ message: "Lỗi!" }); } });
 
 // ==========================================
+// API TRA CỨU ĐƠN HÀNG CHO KHÁCH VÃNG LAI
+// ==========================================
+app.post('/api/orders/track', async (req, res) => {
+    try {
+        const { orderId, phone } = req.body;
+        if (!orderId || !phone) return res.status(400).json({ success: false, message: "Vui lòng nhập đủ thông tin!" });
+
+        // Tìm đơn hàng theo Mã (bỏ qua khoảng trắng và viết hoa)
+        const order = await Order.findOne({ orderId: orderId.trim().toUpperCase() });
+        if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng này trên hệ thống!" });
+
+        // Xác thực bảo mật: Số điện thoại phải khớp với dữ liệu đã lưu
+        if (!order.username.includes(phone.trim())) {
+            return res.status(403).json({ success: false, message: "Số điện thoại không khớp với đơn hàng này!" });
+        }
+
+        res.json({ success: true, order: order });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Lỗi hệ thống máy chủ!" });
+    }
+});
+
+// ==========================================
 // API THỐNG KÊ DOANH THU 
 // ==========================================
 app.get('/api/admin/revenue', async (req, res) => {
