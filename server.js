@@ -204,14 +204,14 @@ const verifyToken = async (req, res, next) => {
 };
 
 // KIỂM TRA BẢO MẬT VÀ TRẢ VỀ GIỎ HÀNG MỚI NHẤT TỪ CLOUD
-app.get('/api/auth/verify', verifyToken, async (req, res) => { 
+app.get('/api/auth/verify', verifyToken, async (req, res) => {
     try {
         let user = await User.findById(req.user.id) || await Admin.findById(req.user.id);
-        res.json({ 
-            success: true, 
+        res.json({
+            success: true,
             // Trả về giỏ hàng mới nhất lưu trong Database
-            cart: user ? user.cart : [] 
-        }); 
+            cart: user ? user.cart : []
+        });
     } catch (err) {
         res.json({ success: true });
     }
@@ -766,18 +766,25 @@ app.put('/api/products/:id/view', async (req, res) => {
 app.post('/api/vnpay/create_url', async (req, res) => {
     try {
         let ipAddr = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
-        
+        // Bắt buộc chuẩn hóa IP về 1 địa chỉ duy nhất
+        if (typeof ipAddr === 'string' && ipAddr.includes(',')) {
+            ipAddr = ipAddr.split(',')[0].trim();
+        }
+        if (ipAddr === '::1') {
+            ipAddr = '127.0.0.1';
+        }
+
         // Cấu hình mã Sandbox VNPay
-        let tmnCode = process.env.VNP_TMNCODE; 
+        let tmnCode = process.env.VNP_TMNCODE;
         let secretKey = process.env.VNP_HASHSECRET;
         let vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-        
+
         // Link web của bạn để VNPay trả khách về sau khi quẹt thẻ xong
         let returnUrl = req.body.returnUrl || "https://raumapc-frontend.vercel.app/pages/info/tracking.html";
 
         let date = new Date();
         let createDate = date.getFullYear() + ('0' + (date.getMonth() + 1)).slice(-2) + ('0' + date.getDate()).slice(-2) + ('0' + date.getHours()).slice(-2) + ('0' + date.getMinutes()).slice(-2) + ('0' + date.getSeconds()).slice(-2);
-        
+
         let orderId = req.body.orderId;
         let amount = req.body.amount;
 
@@ -790,7 +797,7 @@ app.post('/api/vnpay/create_url', async (req, res) => {
         vnp_Params['vnp_TxnRef'] = orderId;
         vnp_Params['vnp_OrderInfo'] = 'Thanh toan don hang ' + orderId;
         vnp_Params['vnp_OrderType'] = 'other';
-        vnp_Params['vnp_Amount'] = amount * 100; // VNPay yêu cầu nhân 100
+        vnp_Params['vnp_Amount'] = Math.round(amount * 100);
         vnp_Params['vnp_ReturnUrl'] = returnUrl;
         vnp_Params['vnp_IpAddr'] = ipAddr;
         vnp_Params['vnp_CreateDate'] = createDate;
@@ -823,13 +830,13 @@ app.get('/api/vnpay/ipn', async (req, res) => {
         if (secureHash === signed) {
             let orderId = vnp_Params['vnp_TxnRef'];
             let rspCode = vnp_Params['vnp_ResponseCode'];
-            
+
             // Nếu khách quẹt thẻ thành công (Mã 00)
             if (rspCode === '00') {
                 let order = await Order.findOne({ orderId: orderId });
                 // TỰ ĐỘNG CHUYỂN TRẠNG THÁI MÀ KHÔNG CẦN ADMIN
                 if (order && order.status === 'Đang chờ duyệt') {
-                    order.status = 'Đang giao hàng'; 
+                    order.status = 'Đang giao hàng';
                     await order.save();
                 }
             }
@@ -1406,9 +1413,9 @@ app.delete('/api/admin/comments/:productId/:commentId', verifyToken, async (req,
     try {
         const product = await Product.findById(req.params.productId);
         if (!product) return res.status(404).json({ success: false, message: "Không tìm thấy sản phẩm!" });
-        
+
         const cmt = product.comments.find(c => c.id === req.params.commentId);
-        if(cmt && cmt.img) await deleteCloudinaryImage(cmt.img); // Xóa ảnh rác trên Cloudinary
+        if (cmt && cmt.img) await deleteCloudinaryImage(cmt.img); // Xóa ảnh rác trên Cloudinary
 
         product.comments = product.comments.filter(c => c.id !== req.params.commentId);
         await product.save();
@@ -1423,11 +1430,11 @@ app.put('/api/admin/comments/:productId/:commentId/reply', verifyToken, async (r
     try {
         const product = await Product.findById(req.params.productId);
         const commentIndex = product.comments.findIndex(c => c.id === req.params.commentId);
-        
+
         product.comments[commentIndex].adminReply = req.body.replyText;
         product.markModified('comments'); // Báo cho MongoDB biết mảng Array đã bị thay đổi
         await product.save();
-        
+
         clearCache();
         res.json({ success: true, message: "Đã gửi phản hồi thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
@@ -1442,28 +1449,28 @@ app.get('/api/admin/fix-price-data', async (req, res) => {
     try {
         const products = await Product.find({});
         let updatedCount = 0;
-        
+
         for (let sp of products) {
             // Kiểm tra xem giá có đang bị lưu dưới dạng chữ (chứa "đ", dấu chấm) không
             if (typeof sp.price === 'string') {
                 // Rút trích chỉ lấy các con số (Cắt bỏ "đ" và dấu "."), ví dụ: "5.000.000đ" -> 5000000
                 let numPrice = parseInt(sp.price.replace(/\D/g, '')) || 0;
-                
+
                 // Cập nhật lại vào Database dưới dạng Number chuẩn
                 await Product.updateOne({ _id: sp._id }, { $set: { price: numPrice } });
                 updatedCount++;
             }
         }
-        
+
         // Nếu bạn đã cài Caching ở bài trước, hãy xóa Cache để dữ liệu mới cập nhật
         if (typeof clearCache === 'function') clearCache();
 
-        res.json({ 
-            success: true, 
-            message: `Ca đại phẫu thành công! Đã chuyển đổi ${updatedCount} sản phẩm sang định dạng Số.` 
+        res.json({
+            success: true,
+            message: `Ca đại phẫu thành công! Đã chuyển đổi ${updatedCount} sản phẩm sang định dạng Số.`
         });
-    } catch (err) { 
-        res.status(500).json({ success: false, message: err.message }); 
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
     }
 });
 
@@ -1475,16 +1482,16 @@ app.get('/share/:id', async (req, res) => {
         const key = req.params.id;
         let sp = mongoose.Types.ObjectId.isValid(key) ? await Product.findById(key) : null;
         if (!sp) sp = await Product.findOne({ productId: key });
-        
+
         if (!sp) return res.status(404).send("Sản phẩm không tồn tại hoặc đã bị xóa.");
 
         // URL trang thực tế trên Vercel của bạn
         const frontendUrl = `https://raumapc-frontend.vercel.app/pages/shop/product-detail.html?id=${sp.productId || sp._id}`;
-        
+
         // Chuẩn hóa dữ liệu chống lỗi ngoặc kép
         const safeName = sp.name.replace(/"/g, '&quot;');
         const safeImg = sp.img && sp.img.startsWith('http') ? sp.img : "https://raumapc-frontend.vercel.app/assets/images/icons/logo.jpg";
-        
+
         // Tạo mô tả ngắn
         let safeDesc = sp.description ? sp.description.replace(/<[^>]*>?/gm, '') : '';
         safeDesc = safeDesc.length > 150 ? safeDesc.substring(0, 150) + '...' : `Mua ngay ${safeName} chính hãng tại Rau Má PC với giá cực sốc.`;
@@ -1518,7 +1525,7 @@ app.get('/share/:id', async (req, res) => {
         </body>
         </html>
         `;
-        
+
         res.send(htmlTemplate);
     } catch (error) {
         res.status(500).send("Lỗi máy chủ khi tạo thẻ chia sẻ!");
