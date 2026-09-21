@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
+const querystring = require('querystring');
 
 const cloudinary = require('cloudinary').v2;
 
@@ -758,6 +759,86 @@ app.put('/api/products/:id/view', async (req, res) => {
 });
 
 // ==========================================
+// API TÍCH HỢP THANH TOÁN VNPAY (TỰ ĐỘNG HÓA)
+// ==========================================
+
+// 1. Gửi thông tin đơn hàng sang VNPay để tạo Link thanh toán
+app.post('/api/vnpay/create_url', async (req, res) => {
+    try {
+        let ipAddr = req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
+        
+        // Cấu hình mã Sandbox VNPay
+        let tmnCode = process.env.VNP_TMNCODE; 
+        let secretKey = process.env.VNP_HASHSECRET;
+        let vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+        
+        // Link web của bạn để VNPay trả khách về sau khi quẹt thẻ xong
+        let returnUrl = req.body.returnUrl || "https://raumapc-frontend.vercel.app/pages/info/tracking.html";
+
+        let date = new Date();
+        let createDate = date.getFullYear() + ('0' + (date.getMonth() + 1)).slice(-2) + ('0' + date.getDate()).slice(-2) + ('0' + date.getHours()).slice(-2) + ('0' + date.getMinutes()).slice(-2) + ('0' + date.getSeconds()).slice(-2);
+        
+        let orderId = req.body.orderId;
+        let amount = req.body.amount;
+
+        let vnp_Params = {};
+        vnp_Params['vnp_Version'] = '2.1.0';
+        vnp_Params['vnp_Command'] = 'pay';
+        vnp_Params['vnp_TmnCode'] = tmnCode;
+        vnp_Params['vnp_Locale'] = 'vn';
+        vnp_Params['vnp_CurrCode'] = 'VND';
+        vnp_Params['vnp_TxnRef'] = orderId;
+        vnp_Params['vnp_OrderInfo'] = 'Thanh toan don hang ' + orderId;
+        vnp_Params['vnp_OrderType'] = 'other';
+        vnp_Params['vnp_Amount'] = amount * 100; // VNPay yêu cầu nhân 100
+        vnp_Params['vnp_ReturnUrl'] = returnUrl;
+        vnp_Params['vnp_IpAddr'] = ipAddr;
+        vnp_Params['vnp_CreateDate'] = createDate;
+
+        vnp_Params = sortObject(vnp_Params);
+        let signData = querystring.stringify(vnp_Params, { encode: false });
+        let hmac = crypto.createHmac("sha512", secretKey);
+        let signed = hmac.update(new Buffer.from(signData, 'utf-8')).digest("hex");
+        vnp_Params['vnp_SecureHash'] = signed;
+        vnpUrl += '?' + querystring.stringify(vnp_Params, { encode: false });
+
+        res.json({ success: true, url: vnpUrl });
+    } catch (err) { res.status(500).json({ success: false, message: "Lỗi tạo link VNPay" }); }
+});
+
+// 2. IPN (Bắt tín hiệu ngầm từ VNPay báo về để tự động duyệt đơn)
+app.get('/api/vnpay/ipn', async (req, res) => {
+    try {
+        let vnp_Params = req.query;
+        let secureHash = vnp_Params['vnp_SecureHash'];
+        delete vnp_Params['vnp_SecureHash'];
+        delete vnp_Params['vnp_SecureHashType'];
+
+        vnp_Params = sortObject(vnp_Params);
+        let secretKey = process.env.VNP_HASHSECRET;
+        let signData = querystring.stringify(vnp_Params, { encode: false });
+        let hmac = crypto.createHmac("sha512", secretKey);
+        let signed = hmac.update(new Buffer.from(signData, 'utf-8')).digest("hex");
+
+        if (secureHash === signed) {
+            let orderId = vnp_Params['vnp_TxnRef'];
+            let rspCode = vnp_Params['vnp_ResponseCode'];
+            
+            // Nếu khách quẹt thẻ thành công (Mã 00)
+            if (rspCode === '00') {
+                let order = await Order.findOne({ orderId: orderId });
+                // TỰ ĐỘNG CHUYỂN TRẠNG THÁI MÀ KHÔNG CẦN ADMIN
+                if (order && order.status === 'Đang chờ duyệt') {
+                    order.status = 'Đang giao hàng'; 
+                    await order.save();
+                }
+            }
+            res.status(200).json({ RspCode: '00', Message: 'Thành công' });
+        } else { res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' }); }
+    } catch (err) { res.status(500).json({ RspCode: '99', Message: 'Lỗi máy chủ' }); }
+});
+
+// ==========================================
 // API ĐƠN HÀNG
 // ==========================================
 app.post('/api/orders', async (req, res) => {
@@ -1443,5 +1524,17 @@ app.get('/share/:id', async (req, res) => {
         res.status(500).send("Lỗi máy chủ khi tạo thẻ chia sẻ!");
     }
 });
+
+function sortObject(obj) {
+    let sorted = {};
+    let str = [];
+    let key;
+    for (key in obj) { if (obj.hasOwnProperty(key)) { str.push(encodeURIComponent(key)); } }
+    str.sort();
+    for (key = 0; key < str.length; key++) {
+        sorted[str[key]] = encodeURIComponent(obj[str[key]]).replace(/%20/g, "+");
+    }
+    return sorted;
+}
 
 app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
