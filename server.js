@@ -1310,4 +1310,62 @@ app.get('/api/admin/fix-price-data', async (req, res) => {
     }
 });
 
+// ==========================================
+// API CHUYÊN DỤNG CHO SEO & CHIA SẺ MẠNG XÃ HỘI (ZALO, FACEBOOK)
+// ==========================================
+app.get('/share/:id', async (req, res) => {
+    try {
+        const key = req.params.id;
+        let sp = mongoose.Types.ObjectId.isValid(key) ? await Product.findById(key) : null;
+        if (!sp) sp = await Product.findOne({ productId: key });
+        
+        if (!sp) return res.status(404).send("Sản phẩm không tồn tại hoặc đã bị xóa.");
+
+        // URL trang thực tế trên Vercel của bạn
+        const frontendUrl = `https://raumapc-frontend.vercel.app/pages/shop/product-detail.html?id=${sp.productId || sp._id}`;
+        
+        // Chuẩn hóa dữ liệu chống lỗi ngoặc kép
+        const safeName = sp.name.replace(/"/g, '&quot;');
+        const safeImg = sp.img && sp.img.startsWith('http') ? sp.img : "https://raumapc-frontend.vercel.app/assets/images/icons/logo.jpg";
+        
+        // Tạo mô tả ngắn
+        let safeDesc = sp.description ? sp.description.replace(/<[^>]*>?/gm, '') : '';
+        safeDesc = safeDesc.length > 150 ? safeDesc.substring(0, 150) + '...' : `Mua ngay ${safeName} chính hãng tại Rau Má PC với giá cực sốc.`;
+
+        // Lắp ráp thẻ HTML có chứa Meta Tags tĩnh cho Bot
+        const htmlTemplate = `
+        <!DOCTYPE html>
+        <html lang="vi">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>${safeName} - Rau Má PC</title>
+            
+            <!-- THẺ MÔ TẢ CHO GOOGLE -->
+            <meta name="description" content="${safeDesc}">
+            <meta name="keywords" content="Rau Má PC, ${sp.brand}, ${sp.category}, linh kiện máy tính">
+            
+            <!-- THẺ OPEN GRAPH CHO FACEBOOK, ZALO, TELEGRAM -->
+            <meta property="og:title" content="${safeName} - Rau Má PC">
+            <meta property="og:description" content="${safeDesc}">
+            <meta property="og:image" content="${safeImg}">
+            <meta property="og:type" content="product">
+            <meta property="og:url" content="${frontendUrl}">
+            
+            <!-- THẺ CHUYỂN HƯỚNG TỐC ĐỘ CAO CHO NGƯỜI DÙNG THẬT -->
+            <meta http-equiv="refresh" content="0; url=${frontendUrl}">
+            <script>window.location.replace("${frontendUrl}");</script>
+        </head>
+        <body style="background: #f4f7fe; font-family: sans-serif; text-align: center; padding-top: 50px;">
+            <p>Đang chuyển hướng đến sản phẩm... Nếu trình duyệt không tự chuyển, vui lòng <a href="${frontendUrl}" style="color: #1435c3;">bấm vào đây</a>.</p>
+        </body>
+        </html>
+        `;
+        
+        res.send(htmlTemplate);
+    } catch (error) {
+        res.status(500).send("Lỗi máy chủ khi tạo thẻ chia sẻ!");
+    }
+});
+
 app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
