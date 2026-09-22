@@ -579,6 +579,7 @@ app.get('/api/products', cacheMiddleware, async (req, res) => {
             productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
             name: sp.name,
             price: sp.price,
+            importPrice: sp.importPrice || 0,
             img: sp.img,
             warranty: sp.warranty,
             status: sp.status || 'Còn hàng',
@@ -617,7 +618,7 @@ app.get('/api/products/detail/:id', cacheMiddleware, async (req, res) => {
         if (!sp) return res.status(404).json({ message: "Không tìm thấy sản phẩm!" });
         res.json({
             id: sp._id.toString(), productId: sp.productId || sp._id.toString().slice(-6).toUpperCase(),
-            name: sp.name, price: sp.price, img: sp.img, warranty: sp.warranty, status: sp.status || 'Còn hàng',
+            name: sp.name, price: sp.price, importPrice: sp.importPrice || 0, img: sp.img, warranty: sp.warranty, status: sp.status || 'Còn hàng',
             stock: sp.stock !== undefined ? sp.stock : 10, category: sp.category, brand: sp.brand, specs: sp.specs, description: sp.description, comments: sp.comments, gallery: sp.gallery || []
         });
     } catch (err) { res.status(500).json({ message: "Lỗi Server" }); }
