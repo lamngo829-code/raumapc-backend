@@ -519,7 +519,9 @@ app.get('/api/products', cacheMiddleware, async (req, res) => {
     try {
         // 1. NHẬN CÁC THAM SỐ TỪ URL (Query Parameters)
         const page = parseInt(req.query.page) || 1;       // Trang hiện tại (Mặc định: 1)
-        const limit = parseInt(req.query.limit) || 12;    // Số SP trên mỗi trang (Mặc định: 12)
+        let limit = parseInt(req.query.limit) || 12;       // Số SP trên mỗi trang (Mặc định: 12)
+        if (limit > 2000) limit = 2000;                    // Chặn giá trị limit quá lớn gây quá tải DB
+        if (limit < 1) limit = 12;
         const skip = (page - 1) * limit;                  // Tính số lượng SP cần bỏ qua
 
         // 2. KHỞI TẠO BỘ LỌC (Query Object)
