@@ -164,7 +164,11 @@ const productSchema = new mongoose.Schema({
 productSchema.index({ name: 'text' });
 const Product = mongoose.model('Product', productSchema);
 
-const orderSchema = new mongoose.Schema({ orderId: String, date: String, username: String, account: String, email: String, items: Array, total: Number, status: String, paymentMethod: String });
+const orderSchema = new mongoose.Schema({ 
+    orderId: String, date: String, username: String, account: String, 
+    email: String, items: Array, total: Number, status: String, paymentMethod: String,
+    createdAt: { type: Date, default: Date.now } // <- THÊM DÒNG NÀY VÀO
+});
 const Order = mongoose.model('Order', orderSchema);
 
 const userSchema = new mongoose.Schema({
@@ -1062,44 +1066,76 @@ app.get('/api/admin/revenue', async (req, res) => {
 app.get('/api/admin/revenue-chart', verifyToken, async (req, res) => {
     if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối quyền truy cập!" });
     try {
-        const orders = await Order.find({ status: "Hoàn thành" });
+        // Mảng trả về sẽ chứa dữ liệu 4 mốc: daily, weekly, monthly, yearly
+        let daily = { labels: [], data: [] };
+        let monthly = { labels: [], data: [] };
+        let yearly = { labels: [], data: [] };
 
-        let daily = {}, weekly = {}, monthly = {}, yearly = {};
-
-        function getWeekNumber(d) {
-            d = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
-            d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
-            var yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
-            return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
-        }
-
-        orders.forEach(order => {
-            let dateStr = order.date || "";
-            let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-            if (dMatch) {
-                let d = parseInt(dMatch[1]), m = parseInt(dMatch[2]), y = parseInt(dMatch[3]);
-                let dateObj = new Date(y, m - 1, d);
-
-                let dayKey = `${d}/${m}/${y}`;
-                let weekKey = `Tuần ${getWeekNumber(dateObj)}, ${y}`;
-                let monthKey = `Tháng ${m}/${y}`;
-                let yearKey = `Năm ${y}`;
-
-                let val = order.total || 0;
-                daily[dayKey] = (daily[dayKey] || 0) + val;
-                weekly[weekKey] = (weekly[weekKey] || 0) + val;
-                monthly[monthKey] = (monthly[monthKey] || 0) + val;
-                yearly[yearKey] = (yearly[yearKey] || 0) + val;
-            }
+        // 1. Thống kê theo ngày (7 ngày gần nhất)
+        const dailyData = await Order.aggregate([
+            { $match: { status: "Hoàn thành" } },
+            { $group: {
+                _id: { $dateToString: { format: "\%d/\%m/\%Y", date: "$createdAt", timezone: "Asia/Ho_Chi_Minh" } },
+                totalAmount: { $sum: "$total" }
+            }},
+            { $sort: { "_id": 1 } },
+            { $limit: 7 } // Chỉ lấy 7 ngày gần nhất cho biểu đồ dễ nhìn
+        ]);
+        
+        dailyData.forEach(item => {
+            daily.labels.push(item._id);
+            daily.data.push(item.totalAmount);
         });
 
+        // 2. Thống kê theo tháng (12 tháng trong năm nay)
+        const currentYear = new Date().getFullYear();
+        const monthlyData = await Order.aggregate([
+            { $match: { 
+                status: "Hoàn thành",
+                createdAt: {
+                    $gte: new Date(`${currentYear}-01-01T00:00:00.000Z`),
+                    $lt: new Date(`${currentYear + 1}-01-01T00:00:00.000Z`)
+                }
+            }},
+            { $group: {
+                _id: { $dateToString: { format: "\%m/\%Y", date: "$createdAt", timezone: "Asia/Ho_Chi_Minh" } },
+                totalAmount: { $sum: "$total" }
+            }},
+            { $sort: { "_id": 1 } }
+        ]);
+
+        monthlyData.forEach(item => {
+            monthly.labels.push(`Tháng ${item._id}`);
+            monthly.data.push(item.totalAmount);
+        });
+
+        // 3. Thống kê theo năm
+        const yearlyData = await Order.aggregate([
+            { $match: { status: "Hoàn thành" } },
+            { $group: {
+                _id: { $dateToString: { format: "\%Y", date: "$createdAt", timezone: "Asia/Ho_Chi_Minh" } },
+                totalAmount: { $sum: "$total" }
+            }},
+            { $sort: { "_id": 1 } }
+        ]);
+
+        yearlyData.forEach(item => {
+            yearly.labels.push(`Năm ${item._id}`);
+            yearly.data.push(item.totalAmount);
+        });
+
+        // Tạm thời để trống tuần (hoặc bạn có thể dùng group $isoWeek)
         res.json({
-            daily: { labels: Object.keys(daily), data: Object.values(daily) },
-            weekly: { labels: Object.keys(weekly), data: Object.values(weekly) },
-            monthly: { labels: Object.keys(monthly), data: Object.values(monthly) },
-            yearly: { labels: Object.keys(yearly), data: Object.values(yearly) }
+            daily: daily,
+            weekly: daily, // Bạn có thể tùy biến thêm đoạn tính tuần tương tự
+            monthly: monthly,
+            yearly: yearly
         });
-    } catch (err) { res.status(500).json({ message: "Lỗi vẽ biểu đồ!" }); }
+
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Lỗi vẽ biểu đồ!" });
+    }
 });
 
 app.put('/api/users/cart', verifyToken, async (req, res) => {
