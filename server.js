@@ -865,15 +865,26 @@ app.get('/api/vnpay/ipn', async (req, res) => {
             let orderId = vnp_Params['vnp_TxnRef'];
             let rspCode = vnp_Params['vnp_ResponseCode'];
 
+            let order = await Order.findOne({ orderId: orderId });
+
             if (rspCode === '00') {
-                let order = await Order.findOne({ orderId: orderId });
-                // Cập nhật trạng thái tự động
+                // KHI KHÁCH THANH TOÁN THÀNH CÔNG
                 if (order && order.status === 'Đang chờ thanh toán') {
                     order.status = 'Đang giao hàng';
                     await order.save();
                 }
+            } else {
+                // KHI KHÁCH BẤM HỦY (Mã 24) HOẶC THANH TOÁN THẤT BẠI
+                if (order && order.status === 'Đang chờ thanh toán') {
+                    order.status = 'Đã hủy'; // Đổi ngay sang Đã hủy
+                    
+                    // (Tùy chọn) Bổ sung vòng lặp hoàn trả lại số lượng tồn kho cho sản phẩm tại đây nếu cần
+                    
+                    await order.save();
+                }
             }
-            res.status(200).json({ RspCode: '00', Message: 'Thành công' });
+            // Luôn phải trả về 00 cho VNPay để xác nhận đã nhận tín hiệu (kể cả khi giao dịch thất bại)
+            res.status(200).json({ RspCode: '00', Message: 'Xác nhận thành công' });
         } else {
             res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' });
         }
