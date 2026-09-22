@@ -870,12 +870,13 @@ app.get('/api/vnpay/ipn', async (req, res) => {
             let order = await Order.findOne({ orderId: orderId });
 
             if (rspCode === '00') {
-                // KHI KHÁCH THANH TOÁN THÀNH CÔNG
+                // KHI KHÁCH THANH TOÁN THÀNH CÔNG QUA VNPAY
                 if (order && order.status === 'Đang chờ thanh toán') {
-                    order.status = 'Đang giao hàng';
+                    order.status = 'Đã thanh toán (Chờ giao)';
                     await order.save();
                 }
-            } else {
+            }
+            else {
                 // KHI KHÁCH BẤM HỦY (Mã 24) HOẶC THANH TOÁN THẤT BẠI
                 if (order && order.status === 'Đang chờ thanh toán') {
                     order.status = 'Đã hủy'; // Đổi ngay sang Đã hủy
