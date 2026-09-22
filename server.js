@@ -156,6 +156,7 @@ mongoose.connect(process.env.MONGO_URI)
 // ==========================================
 const productSchema = new mongoose.Schema({
     productId: String, name: String, price: Number, img: String, warranty: String,
+    importPrice: { type: Number, default: 0 },
     status: { type: String, default: 'Còn hàng' },
     stock: { type: Number, default: 10 },
     specs: String, description: String, category: String, brand: String,
@@ -167,7 +168,8 @@ const Product = mongoose.model('Product', productSchema);
 const orderSchema = new mongoose.Schema({ 
     orderId: String, date: String, username: String, account: String, 
     email: String, items: Array, total: Number, status: String, paymentMethod: String,
-    createdAt: { type: Date, default: Date.now } // <- THÊM DÒNG NÀY VÀO
+    createdAt: { type: Date, default: Date.now },
+    totalImportPrice: { type: Number, default: 0 },
 });
 const Order = mongoose.model('Order', orderSchema);
 
@@ -899,6 +901,31 @@ app.get('/api/vnpay/ipn', async (req, res) => {
 app.post('/api/orders', async (req, res) => {
     try {
         const newOrder = new Order(req.body);
+        let totalImportPrice = 0; // Biến tính tổng giá vốn
+
+        if (newOrder.items && newOrder.items.length > 0) {
+            for (let item of newOrder.items) {
+                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id;
+                if (realId && mongoose.Types.ObjectId.isValid(realId)) {
+                    let product = await Product.findById(realId);
+                    if (product) {
+                        // Trừ tồn kho
+                        product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
+                        if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
+                        
+                        // CỘNG DỒN GIÁ VỐN CHO ĐƠN HÀNG
+                        let itemImportPrice = product.importPrice || 0;
+                        totalImportPrice += (itemImportPrice * qtyNum);
+
+                        await product.save();
+                    }
+                }
+            }
+        }
+        
+        // Gán tổng giá vốn vào đơn hàng
+        newOrder.totalImportPrice = totalImportPrice;
+
         await newOrder.save();
 
         if (newOrder.items && newOrder.items.length > 0) {
@@ -1051,8 +1078,9 @@ app.post('/api/orders/track', async (req, res) => {
 app.get('/api/admin/revenue', async (req, res) => {
     try {
         const orders = await Order.find({ status: "Hoàn thành" });
-        let totalRevenue = 0, totalOrders = 0;
+        let totalRevenue = 0, totalOrders = 0, totalProfit = 0; // Thêm totalProfit
         let weekRev = 0, monthRev = 0, yearRev = 0;
+        let weekProfit = 0, monthProfit = 0, yearProfit = 0;
 
         const now = new Date();
         const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -1065,20 +1093,25 @@ app.get('/api/admin/revenue', async (req, res) => {
         const startOfYear = new Date(now.getFullYear(), 0, 1);
 
         orders.forEach(o => {
-            totalRevenue += o.total || 0;
+            let rev = o.total || 0;
+            let importCost = o.totalImportPrice || 0;
+            let profit = rev - importCost;
+
+            totalRevenue += rev;
+            totalProfit += profit;
             totalOrders++;
 
             let dateStr = o.date || "";
             let dMatch = dateStr.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
             if (dMatch) {
                 let oDate = new Date(dMatch[3], dMatch[2] - 1, dMatch[1]);
-                if (oDate >= startOfWeek) weekRev += o.total || 0;
-                if (oDate >= startOfMonth) monthRev += o.total || 0;
-                if (oDate >= startOfYear) yearRev += o.total || 0;
+                if (oDate >= startOfWeek) { weekRev += rev; weekProfit += profit; }
+                if (oDate >= startOfMonth) { monthRev += rev; monthProfit += profit; }
+                if (oDate >= startOfYear) { yearRev += rev; yearProfit += profit; }
             }
         });
 
-        res.json({ totalRevenue, totalOrders, weekRev, monthRev, yearRev });
+        res.json({ totalRevenue, totalProfit, totalOrders, weekRev, monthRev, yearRev, weekProfit, monthProfit, yearProfit });
     } catch (err) { res.status(500).json({ message: "Lỗi thống kê!" }); }
 });
 
