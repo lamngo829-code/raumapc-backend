@@ -805,6 +805,51 @@ app.put('/api/products/:id/view', async (req, res) => {
 // API TÍCH HỢP THANH TOÁN VNPAY (TỰ ĐỘNG HÓA CHUẨN 100%)
 // ==========================================
 
+// Kiểm tra chữ ký vnp_SecureHash mà VNPay gửi kèm (dùng chung cho cả IPN server-to-server
+// và lệnh xác nhận từ trình duyệt sau khi VNPay chuyển hướng về) - CHỈ tin dữ liệu nếu chữ ký khớp
+function verifyVnpaySignature(rawParams) {
+    let vnp_Params = { ...rawParams };
+    let secureHash = vnp_Params['vnp_SecureHash'];
+    delete vnp_Params['vnp_SecureHash'];
+    delete vnp_Params['vnp_SecureHashType'];
+    vnp_Params = sortObject(vnp_Params);
+
+    let secretKey = process.env.VNP_HASHSECRET;
+    if (!secretKey) return { valid: false };
+
+    let signData = "";
+    let first = true;
+    for (let key in vnp_Params) {
+        if (vnp_Params.hasOwnProperty(key)) {
+            if (!first) signData += '&';
+            signData += key + '=' + vnp_Params[key];
+            first = false;
+        }
+    }
+
+    let hmac = crypto.createHmac("sha512", secretKey);
+    let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
+    return { valid: secureHash === signed };
+}
+
+// Áp dụng kết quả thanh toán VNPay đã được xác thực chữ ký vào đơn hàng tương ứng
+// (dùng chung cho IPN và lệnh xác nhận từ trình duyệt)
+async function applyVnpayResult(orderId, rspCode) {
+    let order = await Order.findOne({ orderId: orderId });
+    if (!order || order.status !== 'Đang chờ thanh toán') return order;
+
+    if (rspCode === '00') {
+        order.status = 'Đã thanh toán (Chờ giao)';
+        await order.save();
+    } else {
+        order.status = 'Đã hủy';
+        await order.save();
+        await adjustProductStock(order.items, 1); // Hoàn lại tồn kho đã trừ lúc đặt hàng
+    }
+    clearCache();
+    return order;
+}
+
 // 1. Gửi thông tin đơn hàng sang VNPay để tạo Link thanh toán
 app.post('/api/vnpay/create_url', async (req, res) => {
     try {
@@ -877,67 +922,34 @@ app.post('/api/vnpay/create_url', async (req, res) => {
     }
 });
 
-// 2. IPN (Bắt tín hiệu ngầm từ VNPay báo về để tự động duyệt đơn)
+// 2. IPN (Bắt tín hiệu ngầm từ VNPay báo về để tự động duyệt đơn - server-to-server, luôn đáng tin nhất)
 app.get('/api/vnpay/ipn', async (req, res) => {
     try {
-        let vnp_Params = req.query;
-        let secureHash = vnp_Params['vnp_SecureHash'];
-        
-        delete vnp_Params['vnp_SecureHash'];
-        delete vnp_Params['vnp_SecureHashType'];
+        const { valid } = verifyVnpaySignature(req.query);
+        if (!valid) return res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' });
 
-        vnp_Params = sortObject(vnp_Params);
-
-        let secretKey = process.env.VNP_HASHSECRET;
-        if (!secretKey) {
-            console.error("Thiếu biến môi trường VNP_HASHSECRET!");
-            return res.status(500).json({ RspCode: '99', Message: 'Lỗi cấu hình máy chủ' });
-        }
-
-        // Tự ghép chuỗi thủ công giống hàm create_url
-        let signData = "";
-        let first = true;
-        for (let key in vnp_Params) {
-            if (vnp_Params.hasOwnProperty(key)) {
-                if (!first) signData += '&';
-                signData += key + '=' + vnp_Params[key];
-                first = false;
-            }
-        }
-
-        let hmac = crypto.createHmac("sha512", secretKey);
-        let signed = hmac.update(Buffer.from(signData, 'utf-8')).digest("hex");
-
-        if (secureHash === signed) {
-            let orderId = vnp_Params['vnp_TxnRef'];
-            let rspCode = vnp_Params['vnp_ResponseCode'];
-
-            let order = await Order.findOne({ orderId: orderId });
-
-            if (rspCode === '00') {
-                // KHI KHÁCH THANH TOÁN THÀNH CÔNG QUA VNPAY
-                if (order && order.status === 'Đang chờ thanh toán') {
-                    order.status = 'Đã thanh toán (Chờ giao)';
-                    await order.save();
-                }
-            }
-            else {
-                // KHI KHÁCH BẤM HỦY (Mã 24) HOẶC THANH TOÁN THẤT BẠI
-                if (order && order.status === 'Đang chờ thanh toán') {
-                    order.status = 'Đã hủy'; // Đổi ngay sang Đã hủy
-                    
-                    // (Tùy chọn) Bổ sung vòng lặp hoàn trả lại số lượng tồn kho cho sản phẩm tại đây nếu cần
-                    
-                    await order.save();
-                }
-            }
-            // Luôn phải trả về 00 cho VNPay để xác nhận đã nhận tín hiệu (kể cả khi giao dịch thất bại)
-            res.status(200).json({ RspCode: '00', Message: 'Xác nhận thành công' });
-        } else {
-            res.status(200).json({ RspCode: '97', Message: 'Mã xác thực không hợp lệ' });
-        }
+        await applyVnpayResult(req.query['vnp_TxnRef'], req.query['vnp_ResponseCode']);
+        // Luôn phải trả về 00 cho VNPay để xác nhận đã nhận tín hiệu (kể cả khi giao dịch thất bại)
+        res.status(200).json({ RspCode: '00', Message: 'Xác nhận thành công' });
     } catch (err) {
         res.status(500).json({ RspCode: '99', Message: 'Lỗi máy chủ' });
+    }
+});
+
+// 3. Xác nhận từ trình duyệt khi VNPay chuyển hướng khách về trang tracking.html.
+// KHÔNG được tin trực tiếp status mà client tự gửi lên - phải xác thực chữ ký vnp_SecureHash
+// y hệt IPN thì mới cập nhật đơn hàng, để tránh bị giả mạo "đã thanh toán" qua URL.
+app.get('/api/vnpay/verify-return', async (req, res) => {
+    try {
+        const { valid } = verifyVnpaySignature(req.query);
+        if (!valid) return res.status(400).json({ success: false, message: "Chữ ký xác thực không hợp lệ!" });
+
+        const order = await applyVnpayResult(req.query['vnp_TxnRef'], req.query['vnp_ResponseCode']);
+        if (!order) return res.status(404).json({ success: false, message: "Không tìm thấy đơn hàng!" });
+
+        res.json({ success: true, status: order.status });
+    } catch (err) {
+        res.status(500).json({ success: false, message: "Lỗi máy chủ!" });
     }
 });
 
@@ -1065,14 +1077,26 @@ app.post('/api/orders', async (req, res) => {
     } catch (error) { res.status(500).json({ message: "Lỗi khi lưu đơn!" }); }
 });
 
-app.get('/api/orders', async (req, res) => { 
-    try { 
+// Toàn bộ đơn hàng của MỌI khách - chỉ Admin được xem (chứa tên, SĐT, địa chỉ khách hàng)
+app.get('/api/orders', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
+    try {
         // Thêm sort({ createdAt: -1 }) để luôn lấy đơn mới nhất, tránh lỗi lưu cache
         const orders = await Order.find().sort({ createdAt: -1 });
-        res.json(orders); 
-    } catch (err) { 
-        res.status(500).json({ message: "Lỗi hệ thống!" }); 
-    } 
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ message: "Lỗi hệ thống!" });
+    }
+});
+
+// Chỉ đơn hàng của CHÍNH khách đang đăng nhập - dùng cho trang "Đơn hàng của tôi"
+app.get('/api/orders/my', verifyToken, async (req, res) => {
+    try {
+        const orders = await Order.find({ account: req.user.username }).sort({ createdAt: -1 });
+        res.json(orders);
+    } catch (err) {
+        res.status(500).json({ message: "Lỗi hệ thống!" });
+    }
 });
 
 // ==========================================
@@ -1195,7 +1219,8 @@ app.put('/api/users/cart', verifyToken, async (req, res) => {
     try { await User.findByIdAndUpdate(req.user.id, { cart: req.body.cart }); res.json({ success: true, message: "Đã đồng bộ giỏ hàng" }); } catch (err) { res.status(500).json({ success: false, message: "Lỗi đồng bộ" }); }
 });
 
-app.put('/api/orders/:id/status', async (req, res) => {
+app.put('/api/orders/:id/status', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
     try {
         const oldOrder = await Order.findOne({ orderId: req.params.id });
         if (!oldOrder) return res.status(404).json({ message: "Không tìm thấy đơn hàng!" });
@@ -1331,7 +1356,8 @@ app.put('/api/orders/:id/status', async (req, res) => {
     } catch (err) { res.status(500).json({ message: "Lỗi hệ thống!" }); }
 });
 
-app.delete('/api/orders/:id', async (req, res) => {
+app.delete('/api/orders/:id', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Từ chối truy cập!" });
     try { await Order.findOneAndDelete({ orderId: req.params.id }); res.json({ success: true, message: "Đã xóa đơn hàng!" }); } catch (err) { res.status(500).json({ success: false, message: "Lỗi xóa đơn hàng!" }); }
 });
 
