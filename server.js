@@ -225,6 +225,11 @@ app.get('/api/auth/verify', verifyToken, async (req, res) => {
 
 app.get('/api/setup-admin', async (req, res) => {
     try {
+        // Bảo mật: bắt buộc phải biết ADMIN_PASS thì mới được phép khởi tạo Admin
+        // (route này không thể dùng verifyToken vì lúc gọi chưa hề có tài khoản Admin nào)
+        if (!process.env.ADMIN_PASS || req.query.key !== process.env.ADMIN_PASS) {
+            return res.status(403).send("<h3>Từ chối truy cập!</h3>");
+        }
         const existingAdmin = await Admin.findOne({ username: 'admin' });
         if (existingAdmin) return res.send("<h3>Tài khoản Admin đã tồn tại!</h3>");
         const salt = await bcrypt.genSalt(10);
@@ -1541,7 +1546,8 @@ app.get('/api/health', (req, res) => { res.json({ status: 'ok', time: new Date()
 // ==========================================
 // API BÍ MẬT: CHUẨN HÓA DỮ LIỆU GIÁ (CHẠY 1 LẦN DUY NHẤT)
 // ==========================================
-app.get('/api/admin/fix-price-data', async (req, res) => {
+app.get('/api/admin/fix-price-data', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Từ chối truy cập!" });
     try {
         const products = await Product.find({});
         let updatedCount = 0;
