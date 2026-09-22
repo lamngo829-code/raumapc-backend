@@ -659,6 +659,35 @@ async function generateAutoId(categoryString) {
     } catch (error) { return prefix + String(Math.floor(Math.random() * 10000000)).padStart(7, '0'); }
 }
 
+// Tìm sản phẩm theo _id MongoDB (từ trang chi tiết/danh mục) hoặc productId dạng chữ
+// (VD: "VGA0000001", từ ô Tìm kiếm) - id lưu trong đơn hàng có thể là 1 trong 2 dạng
+async function findProductByAnyId(realId) {
+    if (!realId) return null;
+    let product = mongoose.Types.ObjectId.isValid(realId) ? await Product.findById(realId) : null;
+    if (!product) product = await Product.findOne({ productId: realId });
+    return product;
+}
+
+// Điều chỉnh tồn kho theo danh sách items của đơn hàng.
+// direction = -1 để trừ kho (đặt hàng mới / mở hủy đơn đã hủy), +1 để hoàn kho (hủy đơn)
+async function adjustProductStock(items, direction) {
+    if (!items || items.length === 0) return;
+    for (let item of items) {
+        let qtyNum = parseInt(item.quantity) || 1;
+        let product = await findProductByAnyId(item.id || item._id);
+        if (!product) continue;
+
+        product.stock = (product.stock !== undefined ? product.stock : 10) + (direction * qtyNum);
+        if (product.stock <= 0) {
+            product.stock = 0;
+            product.status = 'Hết hàng';
+        } else if (product.status === 'Hết hàng') {
+            product.status = 'Còn hàng';
+        }
+        await product.save();
+    }
+}
+
 // TẠO SẢN PHẨM MỚI
 app.post('/api/products', async (req, res) => {
     try {
@@ -922,26 +951,16 @@ app.post('/api/orders', async (req, res) => {
 
         if (newOrder.items && newOrder.items.length > 0) {
             for (let item of newOrder.items) {
-                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id;
-                if (!realId) continue;
-
-                // Sản phẩm có thể được lưu bằng _id MongoDB (từ trang chi tiết/danh mục)
-                // hoặc bằng productId dạng chữ (VD: "VGA0000001", từ ô Tìm kiếm) - phải thử cả 2 kiểu
-                let product = mongoose.Types.ObjectId.isValid(realId) ? await Product.findById(realId) : null;
-                if (!product) product = await Product.findOne({ productId: realId });
-
+                let qtyNum = parseInt(item.quantity) || 1;
+                let product = await findProductByAnyId(item.id || item._id);
                 if (product) {
-                    // Trừ tồn kho
-                    product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
-                    if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
-
-                    // CỘNG DỒN GIÁ VỐN CHO ĐƠN HÀNG
+                    // CỘNG DỒN GIÁ VỐN CHO ĐƠN HÀNG (dựa trên importPrice trước khi trừ kho)
                     let itemImportPrice = product.importPrice || 0;
                     totalImportPrice += (itemImportPrice * qtyNum);
-
-                    await product.save();
                 }
             }
+            // Trừ tồn kho
+            await adjustProductStock(newOrder.items, -1);
         }
 
         // Gán tổng giá vốn vào đơn hàng
@@ -1178,11 +1197,25 @@ app.put('/api/users/cart', verifyToken, async (req, res) => {
 
 app.put('/api/orders/:id/status', async (req, res) => {
     try {
+        const oldOrder = await Order.findOne({ orderId: req.params.id });
+        if (!oldOrder) return res.status(404).json({ message: "Không tìm thấy đơn hàng!" });
+        const oldStatus = oldOrder.status;
+        const newStatus = req.body.status;
+
         const order = await Order.findOneAndUpdate(
             { orderId: req.params.id },
-            { status: req.body.status },
+            { status: newStatus },
             { returnDocument: 'after' }
         );
+
+        // Hoàn lại tồn kho khi đơn chuyển SANG "Đã hủy", trừ lại kho nếu đơn được mở hủy (chuyển RA KHỎI "Đã hủy")
+        if (oldStatus !== 'Đã hủy' && newStatus === 'Đã hủy') {
+            await adjustProductStock(order.items, 1);
+            clearCache();
+        } else if (oldStatus === 'Đã hủy' && newStatus !== 'Đã hủy') {
+            await adjustProductStock(order.items, -1);
+            clearCache();
+        }
 
         let statusTitle = ""; let statusMessage = ""; let color = ""; let bgColor = ""; let emailSubject = ""; let headerSubtitle = "";
 
@@ -1596,12 +1629,7 @@ app.get('/api/admin/fix-order-profit', verifyToken, async (req, res) => {
             let recalculated = 0;
             for (let item of order.items) {
                 let qtyNum = parseInt(item.quantity) || 1;
-                let realId = item.id || item._id;
-                if (!realId) continue;
-
-                let product = mongoose.Types.ObjectId.isValid(realId) ? await Product.findById(realId) : null;
-                if (!product) product = await Product.findOne({ productId: realId });
-
+                let product = await findProductByAnyId(item.id || item._id);
                 if (product) recalculated += (product.importPrice || 0) * qtyNum;
             }
 
