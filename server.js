@@ -1012,7 +1012,15 @@ app.post('/api/orders', async (req, res) => {
     } catch (error) { res.status(500).json({ message: "Lỗi khi lưu đơn!" }); }
 });
 
-app.get('/api/orders', async (req, res) => { try { res.json(await Order.find()); } catch (err) { res.status(500).json({ message: "Lỗi!" }); } });
+app.get('/api/orders', async (req, res) => { 
+    try { 
+        // Thêm sort({ createdAt: -1 }) để luôn lấy đơn mới nhất, tránh lỗi lưu cache
+        const orders = await Order.find().sort({ createdAt: -1 });
+        res.json(orders); 
+    } catch (err) { 
+        res.status(500).json({ message: "Lỗi hệ thống!" }); 
+    } 
+});
 
 // ==========================================
 // API TRA CỨU ĐƠN HÀNG CHO KHÁCH VÃNG LAI
