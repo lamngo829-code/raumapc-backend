@@ -1002,8 +1002,12 @@ app.get('/api/vnpay/verify-return', async (req, res) => {
 // ==========================================
 // API ĐƠN HÀNG
 // ==========================================
-app.post('/api/orders', async (req, res) => {
+app.post('/api/orders', verifyToken, async (req, res) => {
     try {
+        // Ép đơn hàng phải gắn đúng tài khoản của chính người đang đăng nhập,
+        // tránh trường hợp giả mạo tạo đơn dưới tên tài khoản người khác
+        req.body.account = req.user.username;
+
         const newOrder = new Order(req.body);
         let totalImportPrice = 0; // Biến tính tổng giá vốn
 
@@ -1171,7 +1175,8 @@ app.post('/api/orders/track', async (req, res) => {
 // ==========================================
 // API THỐNG KÊ DOANH THU 
 // ==========================================
-app.get('/api/admin/revenue', async (req, res) => {
+app.get('/api/admin/revenue', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ message: "Từ chối truy cập!" });
     try {
         const orders = await Order.find({ status: "Hoàn thành" });
         let totalRevenue = 0, totalOrders = 0, totalProfit = 0; // Thêm totalProfit

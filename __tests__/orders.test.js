@@ -81,12 +81,12 @@ async function makeUserToken(username) {
 describe('Trừ / hoàn tồn kho khi đặt và hủy đơn hàng', () => {
     test('POST /api/orders chỉ trừ kho đúng 1 lần (chống lỗi trừ kho 2 lần)', async () => {
         const product = await createProduct({ stock: 10 });
+        const userToken = await makeUserToken('khachtest1');
 
-        const res = await request(app).post('/api/orders').send({
+        const res = await request(app).post('/api/orders').set('Authorization', 'Bearer ' + userToken).send({
             orderId: 'TESTORDER1',
             date: new Date().toLocaleString('vi-VN'),
             username: 'Khách Test (0900000000 - Địa chỉ test)',
-            account: 'khachtest1',
             email: 'test1@example.com',
             items: [{ id: product._id.toString(), name: product.name, price: product.price, quantity: 3 }],
             total: product.price * 3,
@@ -101,12 +101,12 @@ describe('Trừ / hoàn tồn kho khi đặt và hủy đơn hàng', () => {
 
     test('POST /api/orders tìm đúng sản phẩm khi item.id là productId dạng chữ (từ ô Tìm kiếm)', async () => {
         const product = await createProduct({ stock: 10, productId: 'VGA0000099', importPrice: 500000, price: 900000 });
+        const userToken = await makeUserToken('khachtest2');
 
-        const res = await request(app).post('/api/orders').send({
+        const res = await request(app).post('/api/orders').set('Authorization', 'Bearer ' + userToken).send({
             orderId: 'TESTORDER2',
             date: new Date().toLocaleString('vi-VN'),
             username: 'Khách Test (0900000000 - Địa chỉ test)',
-            account: 'khachtest2',
             email: 'test2@example.com',
             items: [{ id: 'VGA0000099', name: product.name, price: product.price, quantity: 2 }], // id dạng chữ, không phải _id
             total: product.price * 2,
@@ -125,12 +125,12 @@ describe('Trừ / hoàn tồn kho khi đặt và hủy đơn hàng', () => {
     test('Admin hủy đơn hàng sẽ hoàn lại đúng số lượng tồn kho đã trừ', async () => {
         const product = await createProduct({ stock: 10 });
         const adminToken = await makeAdminToken();
+        const userToken = await makeUserToken('khachtest3');
 
-        await request(app).post('/api/orders').send({
+        await request(app).post('/api/orders').set('Authorization', 'Bearer ' + userToken).send({
             orderId: 'TESTORDER3',
             date: new Date().toLocaleString('vi-VN'),
             username: 'Khách Test (0900000000 - Địa chỉ test)',
-            account: 'khachtest3',
             email: 'test3@example.com',
             items: [{ id: product._id.toString(), name: product.name, price: product.price, quantity: 4 }],
             total: product.price * 4,
@@ -182,6 +182,28 @@ describe('Bảo mật quyền truy cập API đơn hàng', () => {
     test('DELETE /api/orders/:id bị từ chối nếu không đăng nhập', async () => {
         const res = await request(app).delete('/api/orders/XYZ');
         expect(res.status).toBe(403);
+    });
+
+    test('POST /api/orders bị từ chối nếu không đăng nhập (chống tạo đơn giả qua API trực tiếp)', async () => {
+        const product = await createProduct({ stock: 10 });
+        const res = await request(app).post('/api/orders').send({
+            orderId: 'NOAUTH1', date: new Date().toLocaleString('vi-VN'), username: 'Khách Test',
+            email: 'noauth@example.com', items: [{ id: product._id.toString(), name: product.name, price: product.price, quantity: 1 }],
+            total: product.price, status: 'Chờ duyệt', paymentMethod: 'Thanh toán COD'
+        });
+        expect(res.status).toBe(403);
+        expect((await Product.findById(product._id)).stock).toBe(10); // Không được trừ kho vì đơn không được tạo
+    });
+
+    test('POST /api/orders luôn gắn account theo tài khoản đăng nhập, không tin account client tự gửi lên', async () => {
+        const userToken = await makeUserToken('nguoiThat');
+        await request(app).post('/api/orders').set('Authorization', 'Bearer ' + userToken).send({
+            orderId: 'SPOOF1', date: new Date().toLocaleString('vi-VN'), username: 'Khách Test',
+            account: 'nguoiGiaMao', // Cố tình gửi account khác - phải bị bỏ qua
+            email: 'spoof@example.com', items: [], total: 0, status: 'Chờ duyệt', paymentMethod: 'Thanh toán COD'
+        });
+        const order = await Order.findOne({ orderId: 'SPOOF1' });
+        expect(order.account).toBe('nguoiThat'); // Không phải 'nguoiGiaMao'
     });
 });
 
@@ -249,9 +271,19 @@ describe('Tính Lãi từ Doanh thu', () => {
             items: [], total: 10000000, totalImportPrice: 6000000, status: 'Hoàn thành'
         });
 
-        const res = await request(app).get('/api/admin/revenue');
+        const adminToken = await makeAdminToken();
+        const res = await request(app).get('/api/admin/revenue').set('Authorization', 'Bearer ' + adminToken);
         expect(res.status).toBe(200);
         expect(res.body.totalRevenue).toBe(10000000);
         expect(res.body.totalProfit).toBe(4000000); // 10tr - 6tr, KHÔNG bằng Doanh thu
+    });
+
+    test('GET /api/admin/revenue bị từ chối nếu không đăng nhập hoặc không phải Admin', async () => {
+        const noAuthRes = await request(app).get('/api/admin/revenue');
+        expect(noAuthRes.status).toBe(403);
+
+        const userToken = await makeUserToken('khachthuong2');
+        const userRes = await request(app).get('/api/admin/revenue').set('Authorization', 'Bearer ' + userToken);
+        expect(userRes.status).toBe(403);
     });
 });
