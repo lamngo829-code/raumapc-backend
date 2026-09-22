@@ -908,41 +908,31 @@ app.post('/api/orders', async (req, res) => {
         if (newOrder.items && newOrder.items.length > 0) {
             for (let item of newOrder.items) {
                 let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id;
-                if (realId && mongoose.Types.ObjectId.isValid(realId)) {
-                    let product = await Product.findById(realId);
-                    if (product) {
-                        // Trừ tồn kho
-                        product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
-                        if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
-                        
-                        // CỘNG DỒN GIÁ VỐN CHO ĐƠN HÀNG
-                        let itemImportPrice = product.importPrice || 0;
-                        totalImportPrice += (itemImportPrice * qtyNum);
+                if (!realId) continue;
 
-                        await product.save();
-                    }
+                // Sản phẩm có thể được lưu bằng _id MongoDB (từ trang chi tiết/danh mục)
+                // hoặc bằng productId dạng chữ (VD: "VGA0000001", từ ô Tìm kiếm) - phải thử cả 2 kiểu
+                let product = mongoose.Types.ObjectId.isValid(realId) ? await Product.findById(realId) : null;
+                if (!product) product = await Product.findOne({ productId: realId });
+
+                if (product) {
+                    // Trừ tồn kho
+                    product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
+                    if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
+
+                    // CỘNG DỒN GIÁ VỐN CHO ĐƠN HÀNG
+                    let itemImportPrice = product.importPrice || 0;
+                    totalImportPrice += (itemImportPrice * qtyNum);
+
+                    await product.save();
                 }
             }
         }
-        
+
         // Gán tổng giá vốn vào đơn hàng
         newOrder.totalImportPrice = totalImportPrice;
 
         await newOrder.save();
-
-        if (newOrder.items && newOrder.items.length > 0) {
-            for (let item of newOrder.items) {
-                let qtyNum = parseInt(item.quantity) || 1; let realId = item.id || item._id;
-                if (realId && mongoose.Types.ObjectId.isValid(realId)) {
-                    let product = await Product.findById(realId);
-                    if (product) {
-                        product.stock = (product.stock !== undefined ? product.stock : 10) - qtyNum;
-                        if (product.stock <= 0) { product.stock = 0; product.status = 'Hết hàng'; }
-                        await product.save();
-                    }
-                }
-            }
-        }
 
         let cusName = newOrder.username; let cusPhone = "Đang cập nhật"; let cusAddress = "Đang cập nhật";
         const match = newOrder.username.match(/(.+?)\s*\((.+?)\s*-\s*(.+)\)/);
@@ -1566,6 +1556,50 @@ app.get('/api/admin/fix-price-data', async (req, res) => {
         res.json({
             success: true,
             message: `Ca đại phẫu thành công! Đã chuyển đổi ${updatedCount} sản phẩm sang định dạng Số.`
+        });
+    } catch (err) {
+        res.status(500).json({ success: false, message: err.message });
+    }
+});
+
+// ==========================================
+// API BÍ MẬT: TÍNH LẠI GIÁ VỐN (totalImportPrice) CHO CÁC ĐƠN HÀNG CŨ (CHẠY 1 LẦN)
+// ==========================================
+// Các đơn hàng tạo trước khi sửa lỗi tra sản phẩm theo productId (thay vì chỉ _id)
+// và trước khi Admin nhập Giá Nhập Vốn đều bị kẹt ở totalImportPrice = 0.
+// API này tính lại dựa trên importPrice HIỆN TẠI của sản phẩm (không đổi lại tồn kho).
+app.get('/api/admin/fix-order-profit', verifyToken, async (req, res) => {
+    if (req.user.role !== 'admin') return res.status(403).json({ success: false, message: "Từ chối truy cập!" });
+    try {
+        const orders = await Order.find({});
+        let updatedCount = 0;
+
+        for (let order of orders) {
+            if (!order.items || order.items.length === 0) continue;
+
+            let recalculated = 0;
+            for (let item of order.items) {
+                let qtyNum = parseInt(item.quantity) || 1;
+                let realId = item.id || item._id;
+                if (!realId) continue;
+
+                let product = mongoose.Types.ObjectId.isValid(realId) ? await Product.findById(realId) : null;
+                if (!product) product = await Product.findOne({ productId: realId });
+
+                if (product) recalculated += (product.importPrice || 0) * qtyNum;
+            }
+
+            if (recalculated !== order.totalImportPrice) {
+                await Order.updateOne({ _id: order._id }, { $set: { totalImportPrice: recalculated } });
+                updatedCount++;
+            }
+        }
+
+        if (typeof clearCache === 'function') clearCache();
+
+        res.json({
+            success: true,
+            message: `Đã tính lại giá vốn cho ${updatedCount}/${orders.length} đơn hàng!`
         });
     } catch (err) {
         res.status(500).json({ success: false, message: err.message });
