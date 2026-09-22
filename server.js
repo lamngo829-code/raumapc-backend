@@ -208,6 +208,36 @@ const Setting = mongoose.model('Setting', settingSchema);
 const couponSchema = new mongoose.Schema({ code: { type: String, required: true, unique: true }, discountPercent: { type: Number, required: true }, isActive: { type: Boolean, default: true }, createdAt: { type: Date, default: Date.now } });
 const Coupon = mongoose.model('Coupon', couponSchema);
 
+// Lưu mã OTP vào MongoDB thay vì RAM để không bị mất khi server restart (Render free tier tự
+// "ngủ" và khởi động lại khi rảnh). expiresAt có index TTL - MongoDB tự xóa document đã hết hạn.
+const otpSchema = new mongoose.Schema({
+    email: { type: String, required: true, unique: true },
+    code: { type: String, required: true },
+    expiresAt: { type: Date, required: true, index: { expires: 0 } }
+});
+const Otp = mongoose.model('Otp', otpSchema);
+
+async function saveOtp(email, code) {
+    await Otp.findOneAndUpdate(
+        { email },
+        { code, expiresAt: new Date(Date.now() + 60000) },
+        { upsert: true }
+    );
+}
+
+// Kiểm tra mã OTP có đúng và còn hạn không - KHÔNG tự xóa (nơi gọi tự xóa sau khi dùng xong,
+// vì có chỗ cần kiểm tra OTP xong rồi mới thao tác DB tiếp, xóa quá sớm sẽ mất OTP giữa chừng)
+async function checkOtp(email, code) {
+    const record = await Otp.findOne({ email });
+    if (!record) return false;
+    if (Date.now() > record.expiresAt.getTime()) return false;
+    return record.code === String(code);
+}
+
+async function clearOtp(email) {
+    await Otp.deleteOne({ email });
+}
+
 const verifyToken = async (req, res, next) => {
     const token = req.headers['authorization'];
     if (!token) return res.status(403).json({ message: "Bạn chưa đăng nhập!" });
@@ -266,7 +296,6 @@ app.post('/api/admin/create', verifyToken, async (req, res) => {
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
 
-const otpCache = {};
 app.post('/api/request-register-otp', async (req, res) => {
     try {
         const email = String(req.body.email);
@@ -276,7 +305,7 @@ app.post('/api/request-register-otp', async (req, res) => {
         if (existingUser) return res.status(400).json({ success: false, message: "Email hoặc Tên đăng nhập đã được sử dụng!" });
 
         const otpCode = crypto.randomInt(100000, 1000000).toString();
-        otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
+        await saveOtp(email, otpCode);
 
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
@@ -308,13 +337,12 @@ app.post('/api/register', async (req, res) => {
     try {
         const { fullName, username, password, phone, email, otp } = req.body;
         const safeEmail = String(email);
-        const cached = otpCache[safeEmail];
-        if (!cached || Date.now() > cached.expiresAt || cached.code !== String(otp)) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
+        if (!(await checkOtp(safeEmail, otp))) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
         const salt = await bcrypt.genSalt(10);
         const hashedPassword = await bcrypt.hash(password, salt);
         const newUser = new User({ fullName, username, password: hashedPassword, phone, email: safeEmail });
         await newUser.save();
-        delete otpCache[safeEmail];
+        await clearOtp(safeEmail);
         res.json({ success: true, message: "Đăng ký thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
@@ -339,7 +367,7 @@ app.post('/api/login', async (req, res) => {
         }
 
         const otpCode = crypto.randomInt(100000, 1000000).toString();
-        otpCache[user.email] = { code: otpCode, expiresAt: Date.now() + 60000 };
+        await saveOtp(user.email, otpCode);
 
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
@@ -438,11 +466,8 @@ app.post('/api/login-verify', async (req, res) => {
     try {
         const safeEmail = String(req.body.email);
         const safeOtp = String(req.body.otp);
-        const cached = otpCache[safeEmail];
 
-        if (!cached) return res.status(400).json({ success: false, message: "Phiên đăng nhập không hợp lệ!" });
-        if (Date.now() > cached.expiresAt) return res.status(400).json({ success: false, message: "Mã OTP đã HẾT HẠN!" });
-        if (cached.code !== safeOtp) return res.status(400).json({ success: false, message: "Mã OTP không chính xác!" });
+        if (!(await checkOtp(safeEmail, safeOtp))) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
 
         const user = await User.findOne({ email: safeEmail });
         const now = new Date().toLocaleString('vi-VN', { hour12: false });
@@ -451,7 +476,7 @@ app.post('/api/login-verify', async (req, res) => {
 
         const token = jwt.sign({ id: user._id, username: user.username, role: 'user' }, JWT_SECRET, { expiresIn: '7d' });
         const userData = { username: user.username, fullName: user.fullName, role: 'user', email: user.email, phone: user.phone, cart: user.cart, avatar: user.avatar, createdAt: user.createdAt };
-        delete otpCache[safeEmail];
+        await clearOtp(safeEmail);
         res.json({ success: true, token, user: userData });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi máy chủ!" }); }
 });
@@ -463,7 +488,7 @@ app.post('/api/request-otp', async (req, res) => {
         if (!user) return res.status(404).json({ success: false, message: "Email không tồn tại!" });
 
         const otpCode = crypto.randomInt(100000, 1000000).toString();
-        otpCache[email] = { code: otpCode, expiresAt: Date.now() + 60000 };
+        await saveOtp(email, otpCode);
 
         const htmlContent = `
         <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.05);">
@@ -495,14 +520,13 @@ app.post('/api/forgot-password-verify', async (req, res) => {
     try {
         const { email, otp, newPassword } = req.body;
         const safeEmail = String(email);
-        const cached = otpCache[safeEmail];
-        if (!cached || Date.now() > cached.expiresAt || cached.code !== String(otp)) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
+        if (!(await checkOtp(safeEmail, otp))) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ hoặc đã hết hạn!" });
 
         const user = await User.findOne({ email: safeEmail });
         const salt = await bcrypt.genSalt(10);
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
-        delete otpCache[safeEmail];
+        await clearOtp(safeEmail);
         res.json({ success: true, message: "Khôi phục mật khẩu thành công!" });
     } catch (err) { res.status(500).json({ success: false, message: "Lỗi hệ thống!" }); }
 });
@@ -1462,9 +1486,8 @@ app.post('/api/users/me/update', verifyToken, async (req, res) => {
         if (!user) return res.status(404).json({ success: false, message: "Không tìm thấy người dùng." });
 
         if (email && email !== user.email) {
-            const cached = otpCache[email];
-            if (!cached || Date.now() > cached.expiresAt || cached.code !== otp) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
-            user.email = email; delete otpCache[email];
+            if (!(await checkOtp(email, otp))) return res.status(400).json({ success: false, message: "Mã OTP không hợp lệ!" });
+            user.email = email; await clearOtp(email);
         }
 
         if (phone) user.phone = phone;

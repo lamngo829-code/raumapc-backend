@@ -5,10 +5,11 @@
 // - Giả mạo trạng thái "đã thanh toán" qua VNPay mà không xác thực chữ ký
 // - API đơn hàng lộ dữ liệu khách hàng / không kiểm tra quyền Admin
 // - Lãi luôn bằng Doanh thu vì không trừ giá vốn
+// - Mã OTP lưu trong RAM sẽ mất khi server Render restart/ngủ đông
 const crypto = require('crypto');
 const { MongoMemoryServer } = require('mongodb-memory-server');
 
-let mongod, app, request, mongoose, jwt, Product, Order, User, Admin;
+let mongod, app, request, mongoose, jwt, Product, Order, User, Admin, Otp;
 
 const VNP_SECRET = 'TESTSECRETKEYFORUNITTESTSONLY12';
 
@@ -42,6 +43,7 @@ beforeAll(async () => {
     Order = mongoose.model('Order');
     User = mongoose.model('User');
     Admin = mongoose.model('Admin');
+    Otp = mongoose.model('Otp');
 }, 60000);
 
 afterAll(async () => {
@@ -260,6 +262,37 @@ describe('Xác thực chữ ký thanh toán VNPay (chống giả mạo)', () => 
         expect(res.status).toBe(200);
         expect(res.body.status).toBe('Đã hủy');
         expect((await Product.findById(product._id)).stock).toBe(10); // Hoàn lại tồn kho
+    });
+});
+
+describe('Mã OTP lưu trong MongoDB (không mất khi server restart)', () => {
+    test('Xin OTP sẽ tạo bản ghi thật trong collection Otp, không phải biến RAM', async () => {
+        await User.create({ fullName: 'OTP User', username: 'otpuser1', password: 'x', phone: '0911111111', email: 'otpuser1@example.com' });
+
+        const res = await request(app).post('/api/request-otp').send({ email: 'otpuser1@example.com' });
+        expect(res.status).toBe(200);
+
+        const record = await Otp.findOne({ email: 'otpuser1@example.com' });
+        expect(record).not.toBeNull();
+        expect(record.code).toMatch(/^\d{6}$/);
+    });
+
+    test('Xác thực đúng OTP đã lưu trong DB thành công, và OTP bị xóa sau khi dùng (không dùng lại được)', async () => {
+        await User.create({ fullName: 'OTP User2', username: 'otpuser2', password: 'x', phone: '0911111112', email: 'otpuser2@example.com' });
+        await Otp.create({ email: 'otpuser2@example.com', code: '123456', expiresAt: new Date(Date.now() + 60000) });
+
+        const res = await request(app).post('/api/forgot-password-verify').send({ email: 'otpuser2@example.com', otp: '123456', newPassword: 'matkhaumoi123' });
+        expect(res.status).toBe(200);
+        expect(res.body.success).toBe(true);
+        expect(await Otp.findOne({ email: 'otpuser2@example.com' })).toBeNull();
+    });
+
+    test('OTP đã hết hạn (expiresAt trong quá khứ) bị từ chối dù gõ đúng mã', async () => {
+        await User.create({ fullName: 'OTP User3', username: 'otpuser3', password: 'x', phone: '0911111113', email: 'otpuser3@example.com' });
+        await Otp.create({ email: 'otpuser3@example.com', code: '654321', expiresAt: new Date(Date.now() - 1000) }); // Hết hạn 1 giây trước
+
+        const res = await request(app).post('/api/forgot-password-verify').send({ email: 'otpuser3@example.com', otp: '654321', newPassword: 'matkhaumoi123' });
+        expect(res.status).toBe(400);
     });
 });
 
