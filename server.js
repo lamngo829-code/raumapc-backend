@@ -137,6 +137,11 @@ app.use(globalLimiter);
 const authLimiter = rateLimit({ windowMs: 5 * 60 * 1000, max: 5, message: { success: false, message: "Phát hiện dấu hiệu dò mật khẩu/OTP! Vui lòng thao tác chậm lại hoặc thử lại sau 5 phút." } });
 
 const geoBlocker = (req, res, next) => {
+    // /api/health phải luôn cho qua bất kể IP nào gọi tới - đây là endpoint để dịch vụ giám sát/cron
+    // (thường đặt server ở nước ngoài) gọi định kỳ giữ cho Render không ngủ đông, không liên quan
+    // gì đến việc mua bán nên không cần giới hạn theo lãnh thổ
+    if (req.path === '/api/health') return next();
+
     let ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     if (ip) {
         ip = ip.split(',')[0].trim();
