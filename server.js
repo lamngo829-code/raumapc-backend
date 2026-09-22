@@ -1,4 +1,15 @@
 require('dotenv').config();
+
+// Theo dõi lỗi production (tùy chọn) - chỉ bật khi đã cấu hình SENTRY_DSN trong biến môi trường.
+// Nếu chưa có tài khoản Sentry (sentry.io, có gói miễn phí) thì bỏ qua, code vẫn chạy bình thường.
+let Sentry = null;
+if (process.env.SENTRY_DSN) {
+    Sentry = require('@sentry/node');
+    Sentry.init({ dsn: process.env.SENTRY_DSN, tracesSampleRate: 0.1, environment: process.env.NODE_ENV || 'production' });
+    process.on('uncaughtException', (err) => Sentry.captureException(err));
+    process.on('unhandledRejection', (err) => Sentry.captureException(err));
+}
+
 const geoip = require('geoip-lite');
 const express = require('express');
 const cors = require('cors');
@@ -668,6 +679,35 @@ async function findProductByAnyId(realId) {
     return product;
 }
 
+const LOW_STOCK_THRESHOLD = 5; // Đồng bộ với ngưỡng "Sắp hết hàng" đang dùng trong trang Admin
+
+// Gửi email cảnh báo cho chủ shop khi 1 sản phẩm vừa tụt xuống dưới ngưỡng tồn kho thấp
+function sendLowStockAlert(product) {
+    const htmlContent = `
+    <div style="font-family: 'Segoe UI', Arial, sans-serif; max-width: 500px; margin: 0 auto; border: 1px solid #eaebec; border-radius: 12px; overflow: hidden;">
+        <div style="background: #dc2626; padding: 20px; text-align: center;">
+            <h2 style="color: white; margin: 0;">⚠️ CẢNH BÁO SẮP HẾT HÀNG</h2>
+        </div>
+        <div style="padding: 25px; background: #ffffff;">
+            <p style="font-size: 15px; color: #333;">Sản phẩm sau đang sắp hết hàng trong kho:</p>
+            <table style="width: 100%; font-size: 14px; line-height: 1.8;">
+                <tr><td style="font-weight:bold; width: 120px;">Tên SP:</td><td>${product.name}</td></tr>
+                <tr><td style="font-weight:bold;">Mã SP:</td><td>${product.productId}</td></tr>
+                <tr><td style="font-weight:bold;">Tồn kho còn:</td><td style="color:#dc2626; font-weight:bold;">${product.stock}</td></tr>
+            </table>
+            <p style="font-size: 13px; color: #64748b; margin-top: 20px;">Vui lòng vào trang Admin để nhập thêm hàng.</p>
+        </div>
+    </div>`;
+    const emailData = {
+        service_id: process.env.EMAILJS_SERVICE_ID,
+        template_id: process.env.EMAILJS_TEMPLATE_ID,
+        user_id: process.env.EMAILJS_USER_ID,
+        accessToken: process.env.EMAILJS_TOKEN,
+        template_params: { to_email: "lamngo829@gmail.com", subject: `⚠️ SẮP HẾT HÀNG: ${product.name}`, message: htmlContent }
+    };
+    fetch('https://api.emailjs.com/api/v1.0/email/send', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(emailData) }).catch(e => console.log(e));
+}
+
 // Điều chỉnh tồn kho theo danh sách items của đơn hàng.
 // direction = -1 để trừ kho (đặt hàng mới / mở hủy đơn đã hủy), +1 để hoàn kho (hủy đơn)
 async function adjustProductStock(items, direction) {
@@ -677,7 +717,8 @@ async function adjustProductStock(items, direction) {
         let product = await findProductByAnyId(item.id || item._id);
         if (!product) continue;
 
-        product.stock = (product.stock !== undefined ? product.stock : 10) + (direction * qtyNum);
+        const stockBefore = product.stock !== undefined ? product.stock : 10;
+        product.stock = stockBefore + (direction * qtyNum);
         if (product.stock <= 0) {
             product.stock = 0;
             product.status = 'Hết hàng';
@@ -685,6 +726,11 @@ async function adjustProductStock(items, direction) {
             product.status = 'Còn hàng';
         }
         await product.save();
+
+        // Chỉ gửi cảnh báo đúng lúc tồn kho VỪA vượt xuống dưới ngưỡng (tránh spam email mỗi đơn hàng)
+        if (direction < 0 && stockBefore >= LOW_STOCK_THRESHOLD && product.stock < LOW_STOCK_THRESHOLD) {
+            sendLowStockAlert(product);
+        }
     }
 }
 
@@ -1746,4 +1792,15 @@ function sortObject(obj) {
     return sorted;
 }
 
-app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
+// Bắt các lỗi bật ra ngoài mọi route (route nào cũng có try/catch riêng nên hiếm khi tới đây,
+// nhưng vẫn cần lưới an toàn cuối cùng để không bỏ sót)
+if (Sentry) Sentry.setupExpressErrorHandler(app);
+
+// Chỉ thật sự mở cổng lắng nghe khi server.js được chạy trực tiếp (node server.js).
+// Khi file này được require() để viết test (supertest), KHÔNG mở cổng thật - test tự gọi
+// request(app) để gửi request giả lập, không cần server thật sự lắng nghe port nào cả.
+if (require.main === module) {
+    app.listen(process.env.PORT || 3000, () => console.log(`✅ Máy chủ đang chạy ở chuẩn bảo mật Doanh Nghiệp`));
+}
+
+module.exports = app;
