@@ -777,8 +777,12 @@ app.post('/api/vnpay/create_url', async (req, res) => {
         if (typeof ipAddr === 'string') ipAddr = ipAddr.split(',')[0].trim();
         if (!ipAddr || ipAddr === '::1' || ipAddr === '127.0.0.1') ipAddr = '113.190.233.15'; 
 
-        let tmnCode = process.env.VNP_TMNCODE || "7TEN2MKH";
-        let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
+        let tmnCode = process.env.VNP_TMNCODE;
+        let secretKey = process.env.VNP_HASHSECRET;
+        if (!tmnCode || !secretKey) {
+            console.error("Thiếu biến môi trường VNP_TMNCODE hoặc VNP_HASHSECRET!");
+            return res.status(500).json({ success: false, message: "Cổng thanh toán VNPay chưa được cấu hình!" });
+        }
         let vnpUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
         let returnUrl = req.body.returnUrl || "https://raumapc-frontend.vercel.app/pages/info/tracking.html";
 
@@ -847,9 +851,13 @@ app.get('/api/vnpay/ipn', async (req, res) => {
         delete vnp_Params['vnp_SecureHashType'];
 
         vnp_Params = sortObject(vnp_Params);
-        
-        let secretKey = process.env.VNP_HASHSECRET || "VCHJUJJASHUJNOFFCOFKNKKRBFKHNICM";
-        
+
+        let secretKey = process.env.VNP_HASHSECRET;
+        if (!secretKey) {
+            console.error("Thiếu biến môi trường VNP_HASHSECRET!");
+            return res.status(500).json({ RspCode: '99', Message: 'Lỗi cấu hình máy chủ' });
+        }
+
         // Tự ghép chuỗi thủ công giống hàm create_url
         let signData = "";
         let first = true;
